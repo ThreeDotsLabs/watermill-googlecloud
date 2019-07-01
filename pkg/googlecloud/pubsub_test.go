@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill-googlecloud/pkg/googlecloud"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/infrastructure"
-	"github.com/ThreeDotsLabs/watermill-googlecloud/pkg/googlecloud"
 )
 
 // Run `docker-compose up` and set PUBSUB_EMULATOR_HOST=localhost:8085 for this to work
@@ -31,6 +31,7 @@ func newPubSub(t *testing.T, marshaler googlecloud.MarshalerUnmarshaler, subscri
 	require.NoError(t, err)
 
 	subscriber, err := googlecloud.NewSubscriber(
+		context.Background(),
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subscriptionName,
 			SubscriptionConfig: pubsub.SubscriptionConfig{
@@ -78,16 +79,22 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 		return fmt.Sprintf("sub_%d", testNumber)
 	}
 
-	sub1, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
-		GenerateSubscriptionName: subNameFn,
-	}, logger)
+	sub1, err := googlecloud.NewSubscriber(
+		context.Background(),
+		googlecloud.SubscriberConfig{
+			GenerateSubscriptionName: subNameFn,
+		}, logger)
 	require.NoError(t, err)
 
 	topic1 := fmt.Sprintf("topic1_%d", testNumber)
 
-	sub2, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
-		GenerateSubscriptionName: subNameFn,
-	}, logger)
+	sub2, err := googlecloud.NewSubscriber(
+		context.Background(),
+		googlecloud.SubscriberConfig{
+			GenerateSubscriptionName: subNameFn,
+		},
+		logger,
+	)
 	require.NoError(t, err)
 	topic2 := fmt.Sprintf("topic2_%d", testNumber)
 

@@ -110,15 +110,18 @@ func (c *SubscriberConfig) setDefaults() {
 }
 
 func NewSubscriber(
+	ctx context.Context,
 	config SubscriberConfig,
 	logger watermill.LoggerAdapter,
 ) (*Subscriber, error) {
 	config.setDefaults()
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
-	defer cancel()
-
-	client, err := pubsub.NewClient(ctx, config.ProjectID, config.ClientOptions...)
+	clientOptions := []option.ClientOption{
+		// grpc.WithTimeout is deprecated, but pubsub.NewClient doesn't allow grpc.DialContext, only grpc.Dial
+		option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout)),
+	}
+	clientOptions = append(clientOptions, config.ClientOptions...)
+	client, err := pubsub.NewClient(ctx, config.ProjectID, clientOptions...)
 	if err != nil {
 		return nil, err
 	}
