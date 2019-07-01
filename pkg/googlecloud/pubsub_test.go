@@ -31,7 +31,6 @@ func newPubSub(t *testing.T, marshaler googlecloud.MarshalerUnmarshaler, subscri
 	require.NoError(t, err)
 
 	subscriber, err := googlecloud.NewSubscriber(
-		context.Background(),
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subscriptionName,
 			SubscriptionConfig: pubsub.SubscriptionConfig{
@@ -80,7 +79,6 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	}
 
 	sub1, err := googlecloud.NewSubscriber(
-		context.Background(),
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subNameFn,
 		}, logger)
@@ -89,7 +87,6 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	topic1 := fmt.Sprintf("topic1_%d", testNumber)
 
 	sub2, err := googlecloud.NewSubscriber(
-		context.Background(),
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subNameFn,
 		},

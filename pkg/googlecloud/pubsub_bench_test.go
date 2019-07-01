@@ -1,7 +1,6 @@
 package googlecloud_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -25,7 +24,6 @@ func BenchmarkSubscriber(b *testing.B) {
 		}
 
 		subscriber, err := googlecloud.NewSubscriber(
-			context.Background(),
 			googlecloud.SubscriberConfig{},
 			logger,
 		)

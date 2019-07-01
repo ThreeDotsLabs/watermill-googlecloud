@@ -110,7 +110,6 @@ func (c *SubscriberConfig) setDefaults() {
 }
 
 func NewSubscriber(
-	ctx context.Context,
 	config SubscriberConfig,
 	logger watermill.LoggerAdapter,
 ) (*Subscriber, error) {
@@ -121,7 +120,7 @@ func NewSubscriber(
 		option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout)),
 	}
 	clientOptions = append(clientOptions, config.ClientOptions...)
-	client, err := pubsub.NewClient(ctx, config.ProjectID, clientOptions...)
+	client, err := pubsub.NewClient(context.Background(), config.ProjectID, clientOptions...)
 	if err != nil {
 		return nil, err
 	}
