@@ -81,7 +81,8 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	sub1, err := googlecloud.NewSubscriber(
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subNameFn,
-		}, logger)
+		}, logger,
+	)
 	require.NoError(t, err)
 
 	topic1 := fmt.Sprintf("topic1_%d", testNumber)
