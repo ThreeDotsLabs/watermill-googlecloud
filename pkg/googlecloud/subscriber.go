@@ -118,9 +118,12 @@ func NewSubscriber(
 	clientOptions := []option.ClientOption{}
 	if config.ConnectTimeout != 0 {
 		// grpc.WithTimeout is deprecated, but pubsub.NewClient doesn't allow grpc.DialContext, only grpc.Dial
-		clientOptions = append(clientOptions, option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout))),
+		clientOptions = append(clientOptions, option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout)))
 	}
 	clientOptions = append(clientOptions, config.ClientOptions...)
+	logger.Debug("connecting to google cloud pubsub", watermill.LogFields{
+		"timeout": config.ConnectTimeout,
+	})
 	client, err := pubsub.NewClient(context.Background(), config.ProjectID, clientOptions...)
 	if err != nil {
 		return nil, err
