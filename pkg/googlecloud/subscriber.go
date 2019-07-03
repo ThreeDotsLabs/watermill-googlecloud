@@ -115,9 +115,10 @@ func NewSubscriber(
 ) (*Subscriber, error) {
 	config.setDefaults()
 
-	clientOptions := []option.ClientOption{
+	clientOptions := []option.ClientOption{}
+	if config.ConnectTimeout != 0 {
 		// grpc.WithTimeout is deprecated, but pubsub.NewClient doesn't allow grpc.DialContext, only grpc.Dial
-		option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout)),
+		clientOptions = append(clientOptions, option.WithGRPCDialOption(grpc.WithTimeout(config.ConnectTimeout))),
 	}
 	clientOptions = append(clientOptions, config.ClientOptions...)
 	client, err := pubsub.NewClient(context.Background(), config.ProjectID, clientOptions...)
