@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/ThreeDotsLabs/watermill/message/infrastructure"
 	"github.com/ThreeDotsLabs/watermill-googlecloud/pkg/googlecloud"
+	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
 )
 
 // Run `docker-compose up` and set PUBSUB_EMULATOR_HOST=localhost:8085 for this to work
@@ -56,9 +56,9 @@ func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
 }
 
 func TestPublishSubscribe(t *testing.T) {
-	infrastructure.TestPubSub(
+	tests.TestPubSub(
 		t,
-		infrastructure.Features{
+		tests.Features{
 			ConsumerGroups:      true,
 			ExactlyOnceDelivery: false,
 			GuaranteedOrder:     false,

@@ -2,7 +2,7 @@ module github.com/ThreeDotsLabs/watermill-googlecloud
 
 require (
 	cloud.google.com/go v0.38.0
-	github.com/ThreeDotsLabs/watermill v0.4.1-0.20190804090002-e46bea54b57b
+	github.com/ThreeDotsLabs/watermill v0.4.1-0.20190807203253-577f2aca3bda
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/pkg/errors v0.8.1
 	github.com/stretchr/testify v1.3.0
