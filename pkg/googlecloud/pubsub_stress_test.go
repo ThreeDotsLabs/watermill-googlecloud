@@ -5,15 +5,15 @@ package googlecloud_test
 import (
 	"testing"
 
-	"github.com/ThreeDotsLabs/watermill/message/infrastructure"
+	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
 )
 
 // Run `docker-compose up` and set PUBSUB_EMULATOR_HOST=localhost:8085 for this to work
 
 func TestPublishSubscribe_stress(t *testing.T) {
-	infrastructure.TestPubSubStressTest(
+	tests.TestPubSubStressTest(
 		t,
-		infrastructure.Features{
+		tests.Features{
 			ConsumerGroups:      true,
 			ExactlyOnceDelivery: false,
 			GuaranteedOrder:     false,
