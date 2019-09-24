@@ -2,7 +2,7 @@ module github.com/ThreeDotsLabs/watermill-googlecloud
 
 require (
 	cloud.google.com/go v0.38.0
-	github.com/ThreeDotsLabs/watermill v1.0.0-rc.2
+	github.com/ThreeDotsLabs/watermill v1.0.0
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/pkg/errors v0.8.1
