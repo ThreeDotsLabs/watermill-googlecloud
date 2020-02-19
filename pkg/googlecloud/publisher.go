@@ -76,8 +76,7 @@ func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publ
 		logger: logger,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
-	defer cancel()
+	ctx, _ := context.WithTimeout(context.Background(), config.ConnectTimeout)
 
 	var err error
 	pub.client, err = pubsub.NewClient(ctx, config.ProjectID, config.ClientOptions...)
@@ -100,8 +99,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return ErrPublisherClosed
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.config.PublishTimeout)
-	defer cancel()
+	ctx, _ := context.WithTimeout(context.Background(), p.config.PublishTimeout)
 
 	t, err := p.topic(ctx, topic)
 	if err != nil {

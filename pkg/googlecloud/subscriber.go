@@ -115,8 +115,7 @@ func NewSubscriber(
 ) (*Subscriber, error) {
 	config.setDefaults()
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
-	defer cancel()
+	ctx, _ := context.WithTimeout(context.Background(), config.ConnectTimeout)
 
 	client, err := pubsub.NewClient(ctx, config.ProjectID, config.ClientOptions...)
 	if err != nil {
@@ -201,8 +200,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 }
 
 func (s *Subscriber) SubscribeInitialize(topic string) (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.config.InitializeTimeout)
-	defer cancel()
+	ctx, _ := context.WithTimeout(context.Background(), s.config.InitializeTimeout)
 
 	subscriptionName := s.config.GenerateSubscriptionName(topic)
 	logFields := watermill.LogFields{
