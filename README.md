@@ -25,6 +25,14 @@ All contributions are very much welcome. If you'd like to help with Watermill de
 please see [open issues](https://github.com/ThreeDotsLabs/watermill/issues?utf8=%E2%9C%93&q=is%3Aissue+is%3Aopen+)
 and submit your pull request via GitHub.
 
+### Testing Locally
+
+The tests expect a running instance of PubSub. You can run the emulator specified in the `docker-compose.yml`, then set the correct env variable by running the following:
+```
+make up
+PUBSUB_EMULATOR_HOST=localhost:8085 make test
+```
+
 ## Support
 
 If you didn't find the answer to your question in [the documentation](https://watermill.io/), feel free to ask us directly!
