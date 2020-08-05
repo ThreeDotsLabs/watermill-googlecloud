@@ -9,8 +9,8 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -228,9 +228,7 @@ func (s *Subscriber) Close() error {
 		return nil
 	}
 
-	s.closedLock.Lock()
-	s.closed = true
-	s.closedLock.Unlock()
+	s.setClosed(true)
 	close(s.closing)
 	s.allSubscriptionsWaitGroup.Wait()
 
@@ -363,7 +361,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	if !exists {
 		t, err = s.client.CreateTopic(ctx, topicName)
 
-		if grpc.Code(err) == codes.AlreadyExists {
+		if status.Code(err) == codes.AlreadyExists {
 			s.logger.Debug("Topic already exists", watermill.LogFields{"topic": topicName})
 			t = s.client.Topic(topicName)
 		} else if err != nil {
@@ -375,7 +373,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	config.Topic = t
 
 	sub, err = s.client.CreateSubscription(ctx, subscriptionName, config)
-	if grpc.Code(err) == codes.AlreadyExists {
+	if status.Code(err) == codes.AlreadyExists {
 		s.logger.Debug("Subscription already exists", watermill.LogFields{"subscription": subscriptionName})
 		sub = s.client.Subscription(subscriptionName)
 	} else if err != nil {
@@ -387,7 +385,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	return sub, nil
 }
 
-func (s Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
+func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
 	config, err := sub.Config(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
@@ -403,6 +401,13 @@ func (s Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscr
 	}
 
 	return sub, nil
+}
+
+func (s *Subscriber) setClosed(value bool) {
+	s.closedLock.Lock()
+	defer s.closedLock.Unlock()
+
+	s.closed = value
 }
 
 func (s *Subscriber) getClosed() bool {
