@@ -9,8 +9,8 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -30,8 +30,9 @@ var (
 //
 // For more info on how Google Cloud Pub/Sub Subscribers work, check https://cloud.google.com/pubsub/docs/subscriber.
 type Subscriber struct {
-	closing chan struct{}
-	closed  bool
+	closing    chan struct{}
+	closed     bool
+	closedLock sync.Mutex
 
 	allSubscriptionsWaitGroup sync.WaitGroup
 	activeSubscriptions       map[string]*pubsub.Subscription
@@ -128,8 +129,9 @@ func NewSubscriber(
 	}
 
 	return &Subscriber{
-		closing: make(chan struct{}, 1),
-		closed:  false,
+		closing:    make(chan struct{}, 1),
+		closed:     false,
+		closedLock: sync.Mutex{},
 
 		allSubscriptionsWaitGroup: sync.WaitGroup{},
 		activeSubscriptions:       map[string]*pubsub.Subscription{},
@@ -154,7 +156,7 @@ func NewSubscriber(
 //
 // See https://cloud.google.com/pubsub/docs/subscriber to find out more about how Google Cloud Pub/Sub Subscriptions work.
 func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	if s.closed {
+	if s.getClosed() {
 		return nil, ErrSubscriberClosed
 	}
 
@@ -222,11 +224,11 @@ func (s *Subscriber) SubscribeInitialize(topic string) (err error) {
 // Close notifies the Subscriber to stop processing messages on all subscriptions, close all the output channels
 // and terminate the connection.
 func (s *Subscriber) Close() error {
-	if s.closed {
+	if s.getClosed() {
 		return nil
 	}
 
-	s.closed = true
+	s.setClosed(true)
 	close(s.closing)
 	s.allSubscriptionsWaitGroup.Wait()
 
@@ -307,7 +309,7 @@ func (s *Subscriber) receive(
 		}
 	})
 
-	if err != nil && !s.closed {
+	if err != nil && !s.getClosed() {
 		return err
 	}
 
@@ -359,7 +361,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	if !exists {
 		t, err = s.client.CreateTopic(ctx, topicName)
 
-		if grpc.Code(err) == codes.AlreadyExists {
+		if status.Code(err) == codes.AlreadyExists {
 			s.logger.Debug("Topic already exists", watermill.LogFields{"topic": topicName})
 			t = s.client.Topic(topicName)
 		} else if err != nil {
@@ -371,7 +373,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	config.Topic = t
 
 	sub, err = s.client.CreateSubscription(ctx, subscriptionName, config)
-	if grpc.Code(err) == codes.AlreadyExists {
+	if status.Code(err) == codes.AlreadyExists {
 		s.logger.Debug("Subscription already exists", watermill.LogFields{"subscription": subscriptionName})
 		sub = s.client.Subscription(subscriptionName)
 	} else if err != nil {
@@ -383,7 +385,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	return sub, nil
 }
 
-func (s Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
+func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
 	config, err := sub.Config(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
@@ -399,4 +401,18 @@ func (s Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscr
 	}
 
 	return sub, nil
+}
+
+func (s *Subscriber) setClosed(value bool) {
+	s.closedLock.Lock()
+	defer s.closedLock.Unlock()
+
+	s.closed = value
+}
+
+func (s *Subscriber) getClosed() bool {
+	s.closedLock.Lock()
+	defer s.closedLock.Unlock()
+
+	return s.closed
 }
