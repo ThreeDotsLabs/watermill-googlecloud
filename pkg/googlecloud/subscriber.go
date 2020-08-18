@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -38,7 +39,9 @@ type Subscriber struct {
 	activeSubscriptions       map[string]*pubsub.Subscription
 	activeSubscriptionsLock   sync.RWMutex
 
-	client *pubsub.Client
+	clients     []*pubsub.Client
+	clientsLock sync.RWMutex
+
 	config SubscriberConfig
 
 	logger watermill.LoggerAdapter
@@ -66,8 +69,9 @@ type SubscriberConfig struct {
 	// Otherwise, trying to create a subscription on non-existent topic results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
 
-	// ConnectTimeout defines the timeout for connecting to Pub/Sub
+	// deprecated: ConnectTimeout is no longer used, please use timeout on context in Subscribe()
 	ConnectTimeout time.Duration
+
 	// InitializeTimeout defines the timeout for initializing topics.
 	InitializeTimeout time.Duration
 
@@ -99,9 +103,6 @@ func (c *SubscriberConfig) setDefaults() {
 	if c.GenerateSubscriptionName == nil {
 		c.GenerateSubscriptionName = TopicSubscriptionName
 	}
-	if c.ConnectTimeout == 0 {
-		c.ConnectTimeout = time.Second * 10
-	}
 	if c.InitializeTimeout == 0 {
 		c.InitializeTimeout = time.Second * 10
 	}
@@ -116,14 +117,6 @@ func NewSubscriber(
 ) (*Subscriber, error) {
 	config.setDefaults()
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
-	defer cancel()
-
-	client, err := pubsub.NewClient(ctx, config.ProjectID, config.ClientOptions...)
-	if err != nil {
-		return nil, err
-	}
-
 	if logger == nil {
 		logger = watermill.NopLogger{}
 	}
@@ -137,7 +130,6 @@ func NewSubscriber(
 		activeSubscriptions:       map[string]*pubsub.Subscription{},
 		activeSubscriptionsLock:   sync.RWMutex{},
 
-		client: client,
 		config: config,
 
 		logger: logger,
@@ -232,7 +224,15 @@ func (s *Subscriber) Close() error {
 	close(s.closing)
 	s.allSubscriptionsWaitGroup.Wait()
 
-	err := s.client.Close()
+	s.clientsLock.Lock()
+	defer s.clientsLock.Unlock()
+	var err error
+	for _, client := range s.clients {
+		closeErr := client.Close()
+		if closeErr != nil {
+			err = multierror.Append(closeErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -334,7 +334,12 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		}
 	}()
 
-	sub = s.client.Subscription(subscriptionName)
+	client, err := s.newClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sub = client.Subscription(subscriptionName)
 	exists, err := sub.Exists(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if subscription %s exists", subscriptionName)
@@ -348,7 +353,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		return nil, errors.Wrap(ErrSubscriptionDoesNotExist, subscriptionName)
 	}
 
-	t := s.client.Topic(topicName)
+	t := client.Topic(topicName)
 	exists, err = t.Exists(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topicName)
@@ -359,11 +364,11 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	}
 
 	if !exists {
-		t, err = s.client.CreateTopic(ctx, topicName)
+		t, err = client.CreateTopic(ctx, topicName)
 
 		if status.Code(err) == codes.AlreadyExists {
 			s.logger.Debug("Topic already exists", watermill.LogFields{"topic": topicName})
-			t = s.client.Topic(topicName)
+			t = client.Topic(topicName)
 		} else if err != nil {
 			return nil, errors.Wrap(err, "could not create topic for subscription")
 		}
@@ -372,10 +377,10 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	config := s.config.SubscriptionConfig
 	config.Topic = t
 
-	sub, err = s.client.CreateSubscription(ctx, subscriptionName, config)
+	sub, err = client.CreateSubscription(ctx, subscriptionName, config)
 	if status.Code(err) == codes.AlreadyExists {
 		s.logger.Debug("Subscription already exists", watermill.LogFields{"subscription": subscriptionName})
-		sub = s.client.Subscription(subscriptionName)
+		sub = client.Subscription(subscriptionName)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "cannot create subscription")
 	}
@@ -383,6 +388,19 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	sub.ReceiveSettings = s.config.ReceiveSettings
 
 	return sub, nil
+}
+
+func (s *Subscriber) newClient(ctx context.Context) (*pubsub.Client, error) {
+	client, err := pubsub.NewClient(ctx, s.config.ProjectID, s.config.ClientOptions...)
+	if err != nil {
+		return nil, err
+	}
+
+	s.clientsLock.Lock()
+	s.clients = append(s.clients, client)
+	s.clientsLock.Unlock()
+
+	return client, nil
 }
 
 func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {

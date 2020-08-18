@@ -1,22 +1,24 @@
-up:
-	docker-compose up
+export PUBSUB_EMULATOR_HOST=localhost:8085
 
-test:
+up:
+	docker-compose up -d
+
+test: up
 	go test -parallel 20 ./...
 
-test_v:
+test_v: up
 	go test -parallel 20 -v ./...
 
-test_short:
+test_short: up
 	go test -parallel 20 ./... -short
 
-test_race:
+test_race: up
 	go test ./... -short -race
 
-test_stress:
+test_stress: up
 	go test -tags=stress -parallel 30 -timeout=45m ./...
 
-test_reconnect:
+test_reconnect: up
 	go test -tags=reconnect ./...
 
 fmt:
