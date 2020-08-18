@@ -33,6 +33,13 @@ make up
 PUBSUB_EMULATOR_HOST=localhost:8085 make test
 ```
 
+Running one test:
+
+```
+make up
+PUBSUB_EMULATOR_HOST=localhost:8085 go test -v ./... -run TestPublishSubscribe/TestContinueAfterSubscribeClose
+```
+
 ## Support
 
 If you didn't find the answer to your question in [the documentation](https://watermill.io/), feel free to ask us directly!
