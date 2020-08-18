@@ -69,7 +69,7 @@ type SubscriberConfig struct {
 	// Otherwise, trying to create a subscription on non-existent topic results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
 
-	// deprecated: ConnectTimeout is no longer used, please use timeout on context in Subscribe()
+	// deprecated: ConnectTimeout is no longer used, please use timeout on context in Subscribe() method
 	ConnectTimeout time.Duration
 
 	// InitializeTimeout defines the timeout for initializing topics.
@@ -226,11 +226,12 @@ func (s *Subscriber) Close() error {
 
 	s.clientsLock.Lock()
 	defer s.clientsLock.Unlock()
+
 	var err error
 	for _, client := range s.clients {
 		closeErr := client.Close()
 		if closeErr != nil {
-			err = multierror.Append(closeErr)
+			err = multierror.Append(err, errors.Wrap(closeErr, "unable to close client"))
 		}
 	}
 	if err != nil {
@@ -238,6 +239,7 @@ func (s *Subscriber) Close() error {
 	}
 
 	s.logger.Debug("Google Cloud PubSub subscriber closed", nil)
+
 	return nil
 }
 
