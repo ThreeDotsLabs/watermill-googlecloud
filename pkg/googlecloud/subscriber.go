@@ -420,6 +420,8 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 		)
 	}
 
+	sub.ReceiveSettings = s.config.ReceiveSettings
+
 	return sub, nil
 }
 
