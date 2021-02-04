@@ -1,4 +1,4 @@
-module github.com/ThreeDotsLabs/watermill-googlecloud
+module github.com/usumachi/watermill-googlecloud
 
 go 1.12
 
@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go v0.63.0 // indirect
 	cloud.google.com/go/pubsub v1.6.1
 	github.com/ThreeDotsLabs/watermill v1.2.0-rc.3
+	github.com/ThreeDotsLabs/watermill-googlecloud v1.0.6
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/pkg/errors v0.8.1
 	github.com/stretchr/testify v1.4.0
