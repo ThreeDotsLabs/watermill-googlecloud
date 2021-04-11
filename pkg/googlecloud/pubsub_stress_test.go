@@ -5,7 +5,7 @@ package googlecloud_test
 import (
 	"testing"
 
-	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
+	"github.com/sidkik/watermill/pubsub/tests"
 )
 
 // Run `docker-compose up` and set PUBSUB_EMULATOR_HOST=localhost:8085 for this to work

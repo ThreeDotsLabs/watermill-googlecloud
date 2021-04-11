@@ -4,7 +4,7 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/pkg/errors"
 
-	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/sidkik/watermill/message"
 )
 
 // Marshaler transforms a Waterfall Message into the Google Cloud client library Message.
