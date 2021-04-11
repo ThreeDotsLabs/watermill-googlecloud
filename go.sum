@@ -184,6 +184,8 @@ github.com/prometheus/procfs v0.0.3/go.mod h1:4A/X28fw3Fc593LaREMrKMqOKvUAntwMDa
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 github.com/sidkik/watermill v1.2.0-rc.4.0.20210411171227-ca16561e5528 h1:0rLoKz5aG1sB1jmNE1AzVnBP/Nt76Kx87HD0G9l/AUo=
 github.com/sidkik/watermill v1.2.0-rc.4.0.20210411171227-ca16561e5528/go.mod h1:1iPb/WE5W3qFSMH7N2AtGZLRdlRDuVoCkH4vhM6O1n8=
+github.com/sidkik/watermill v1.2.0-sidkikv1 h1:nlUxcoNo3NrMqK6qgF0qEg5kAT1HYx1hlCoPL0nkapg=
+github.com/sidkik/watermill v1.2.0-sidkikv1/go.mod h1:7qgUJzqcf0o9GsMqDDLKnch+wHBdc+tVYf8kVZxVpYQ=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.1.1/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
