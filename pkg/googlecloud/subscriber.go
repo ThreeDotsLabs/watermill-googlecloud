@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/cenkalti/backoff/v3"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
@@ -166,16 +167,31 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 
 	sub, err := s.subscription(ctx, subscriptionName, topic)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
 	receiveFinished := make(chan struct{})
 	s.allSubscriptionsWaitGroup.Add(1)
 	go func() {
-		err := s.receive(ctx, sub, logFields, output)
-		if err != nil {
-			s.logger.Error("Receiving messages failed", err, logFields)
+		if err := backoff.Retry(func() error {
+			err := s.receive(ctx, sub, logFields, output)
+			if err == nil {
+				s.logger.Info("Receiving messages finished with no error", logFields)
+				return nil
+			}
+
+			if s.getClosed() {
+				s.logger.Info("Receiving messages failed while closed", logFields)
+				return backoff.Permanent(err)
+			}
+
+			s.logger.Error("Receiving messages failed, retrying", err, logFields)
+			return err
+		}, backoff.NewExponentialBackOff()); err != nil {
+			s.logger.Error("Retrying receiving messages failed", err, logFields)
 		}
+
 		close(receiveFinished)
 	}()
 
@@ -249,7 +265,7 @@ func (s *Subscriber) receive(
 	subcribeLogFields watermill.LogFields,
 	output chan *message.Message,
 ) error {
-	err := sub.Receive(ctx, func(ctx context.Context, pubsubMsg *pubsub.Message) {
+	return sub.Receive(ctx, func(ctx context.Context, pubsubMsg *pubsub.Message) {
 		logFields := subcribeLogFields.Copy()
 
 		msg, err := s.config.Unmarshaler.Unmarshal(pubsubMsg)
@@ -310,12 +326,6 @@ func (s *Subscriber) receive(
 			)
 		}
 	})
-
-	if err != nil && !s.getClosed() {
-		return err
-	}
-
-	return nil
 }
 
 // subscription obtains a subscription object.
