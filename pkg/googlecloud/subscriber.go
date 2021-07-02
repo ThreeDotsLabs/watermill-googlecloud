@@ -61,6 +61,11 @@ type SubscriberConfig struct {
 	// ProjectID is the Google Cloud Engine project ID.
 	ProjectID string
 
+	// TopicProjectID is an optionnal configuration value representing
+	// the underlying topic Google Cloud Engine project ID.
+	// This can be helpful when subscription is linked to a topic for another project.
+	TopicProjectID string
+
 	// If false (default), `Subscriber` tries to create a subscription if there is none with the requested name.
 	// Otherwise, trying to use non-existent subscription results in `ErrSubscriptionDoesNotExist`.
 	DoNotCreateSubscriptionIfMissing bool
@@ -84,6 +89,14 @@ type SubscriberConfig struct {
 	// Unmarshaler transforms the client library format into watermill/message.Message.
 	// Use a custom unmarshaler if needed, otherwise the default Unmarshaler should cover most use cases.
 	Unmarshaler Unmarshaler
+}
+
+func (sc SubscriberConfig) topicProjectID() string {
+	if sc.TopicProjectID != "" {
+		return sc.TopicProjectID
+	}
+
+	return sc.ProjectID
 }
 
 type SubscriptionNameFn func(topic string) string
@@ -424,7 +437,7 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
 	}
 
-	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.ProjectID, topic)
+	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.topicProjectID(), topic)
 
 	if config.Topic.String() != fullyQualifiedTopicName {
 		return nil, errors.Wrap(
