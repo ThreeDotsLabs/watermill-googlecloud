@@ -38,6 +38,8 @@ type PublisherConfig struct {
 	// If false (default), `Publisher` tries to create a topic if there is none with the requested name.
 	// Otherwise, trying to subscribe to non-existent subscription results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
+	// Enables the topic message ordering
+	EnableMessageOrdering bool
 
 	// ConnectTimeout defines the timeout for connecting to Pub/Sub
 	ConnectTimeout time.Duration
@@ -170,6 +172,7 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 	}()
 
 	t = p.client.Topic(topic)
+	t.EnableMessageOrdering = p.config.EnableMessageOrdering
 
 	// todo: theoretically, one could want different publish settings per topic, which is supported by the client lib
 	// different instances of publisher may be used then
