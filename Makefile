@@ -30,3 +30,4 @@ update_watermill:
 	sed -i '\|go 1\.|d' go.mod
 	go mod edit -fmt
 
+
