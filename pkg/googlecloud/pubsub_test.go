@@ -102,6 +102,8 @@ func TestPublishSubscribe(t *testing.T) {
 }
 
 func TestPublishSubscribeOrdering(t *testing.T) {
+	t.Skip("skipping because the emulator does not currently redeliver nacked messages when ordering is enabled")
+
 	if testing.Short() {
 		t.Skip("skipping long tests")
 	}
