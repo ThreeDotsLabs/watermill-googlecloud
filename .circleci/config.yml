@@ -73,13 +73,9 @@ workflows:
           requires:
             - build
       - tests_stress:
-          filters:
-            branches:
           requires:
             - build
       - tests_short:
-          filters:
-            branches:
           requires:
             - build
       - tests_race:
