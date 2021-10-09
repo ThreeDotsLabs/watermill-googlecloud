@@ -75,15 +75,11 @@ workflows:
       - tests_stress:
           filters:
             branches:
-              only:
-                - master
           requires:
             - build
       - tests_short:
           filters:
             branches:
-              ignore:
-                - master
           requires:
             - build
       - tests_race:
