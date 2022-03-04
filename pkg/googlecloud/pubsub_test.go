@@ -19,12 +19,13 @@ import (
 
 // Run `docker-compose up` and set PUBSUB_EMULATOR_HOST=localhost:8085 for this to work
 
-func newPubSub(t *testing.T, marshaler googlecloud.MarshalerUnmarshaler, subscriptionName googlecloud.SubscriptionNameFn) (message.Publisher, message.Subscriber) {
+func newPubSub(t *testing.T, enableMessageOrdering bool, marshaler googlecloud.Marshaler, unmarshaler googlecloud.Unmarshaler, subscriptionName googlecloud.SubscriptionNameFn) (message.Publisher, message.Subscriber) {
 	logger := watermill.NewStdLogger(true, true)
 
 	publisher, err := googlecloud.NewPublisher(
 		googlecloud.PublisherConfig{
-			Marshaler: marshaler,
+			EnableMessageOrdering: enableMessageOrdering,
+			Marshaler:             marshaler,
 		},
 		logger,
 	)
@@ -34,9 +35,10 @@ func newPubSub(t *testing.T, marshaler googlecloud.MarshalerUnmarshaler, subscri
 		googlecloud.SubscriberConfig{
 			GenerateSubscriptionName: subscriptionName,
 			SubscriptionConfig: pubsub.SubscriptionConfig{
-				RetainAckedMessages: false,
+				RetainAckedMessages:   false,
+				EnableMessageOrdering: enableMessageOrdering,
 			},
-			Unmarshaler: marshaler,
+			Unmarshaler: unmarshaler,
 		},
 		logger,
 	)
@@ -45,14 +47,44 @@ func newPubSub(t *testing.T, marshaler googlecloud.MarshalerUnmarshaler, subscri
 	return publisher, subscriber
 }
 
+func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
+	var defaultMarshalerUnmarshaler googlecloud.DefaultMarshalerUnmarshaler
+	return newPubSub(t, false, defaultMarshalerUnmarshaler, defaultMarshalerUnmarshaler, googlecloud.TopicSubscriptionName)
+}
+
 func createPubSubWithSubscriptionName(t *testing.T, subscriptionName string) (message.Publisher, message.Subscriber) {
-	return newPubSub(t, googlecloud.DefaultMarshalerUnmarshaler{},
+	var defaultMarshalerUnmarshaler googlecloud.DefaultMarshalerUnmarshaler
+	return newPubSub(t, false, defaultMarshalerUnmarshaler, defaultMarshalerUnmarshaler,
 		googlecloud.TopicSubscriptionNameWithSuffix(subscriptionName),
 	)
 }
 
-func createPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
-	return newPubSub(t, googlecloud.DefaultMarshalerUnmarshaler{}, googlecloud.TopicSubscriptionName)
+func createPubSubWithOrdering(t *testing.T) (message.Publisher, message.Subscriber) {
+	return newPubSub(
+		t,
+		true,
+		googlecloud.NewOrderingMarshaler(func(topic string, msg *message.Message) (string, error) {
+			return "ordering_key", nil
+		}),
+		googlecloud.NewOrderingUnmarshaler(func(orderingKey string, msg *message.Message) error {
+			return nil
+		}),
+		googlecloud.TopicSubscriptionName,
+	)
+}
+
+func createPubSubWithSubscriptionNameWithOrdering(t *testing.T, subscriptionName string) (message.Publisher, message.Subscriber) {
+	return newPubSub(
+		t,
+		true,
+		googlecloud.NewOrderingMarshaler(func(topic string, msg *message.Message) (string, error) {
+			return "ordering_key", nil
+		}),
+		googlecloud.NewOrderingUnmarshaler(func(orderingKey string, msg *message.Message) error {
+			return nil
+		}),
+		googlecloud.TopicSubscriptionNameWithSuffix(subscriptionName),
+	)
 }
 
 func TestPublishSubscribe(t *testing.T) {
@@ -66,6 +98,26 @@ func TestPublishSubscribe(t *testing.T) {
 		},
 		createPubSub,
 		createPubSubWithSubscriptionName,
+	)
+}
+
+func TestPublishSubscribeOrdering(t *testing.T) {
+	t.Skip("skipping because the emulator does not currently redeliver nacked messages when ordering is enabled")
+
+	if testing.Short() {
+		t.Skip("skipping long tests")
+	}
+
+	tests.TestPubSub(
+		t,
+		tests.Features{
+			ConsumerGroups:      true,
+			ExactlyOnceDelivery: false,
+			GuaranteedOrder:     true,
+			Persistent:          true,
+		},
+		createPubSubWithOrdering,
+		createPubSubWithSubscriptionNameWithOrdering,
 	)
 }
 

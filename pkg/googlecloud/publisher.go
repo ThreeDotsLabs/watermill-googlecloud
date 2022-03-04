@@ -18,6 +18,8 @@ var (
 	ErrPublisherClosed = errors.New("publisher is closed")
 	// ErrTopicDoesNotExist happens when trying to publish or subscribe to a topic that doesn't exist.
 	ErrTopicDoesNotExist = errors.New("topic does not exist")
+	// ErrConnectTimeout happens when the Google Cloud PubSub connection context times out.
+	ErrConnectTimeout = errors.New("connect timeout")
 )
 
 type Publisher struct {
@@ -38,6 +40,8 @@ type PublisherConfig struct {
 	// If false (default), `Publisher` tries to create a topic if there is none with the requested name.
 	// Otherwise, trying to subscribe to non-existent subscription results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
+	// Enables the topic message ordering
+	EnableMessageOrdering bool
 
 	// ConnectTimeout defines the timeout for connecting to Pub/Sub
 	ConnectTimeout time.Duration
@@ -79,13 +83,46 @@ func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publ
 	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
 	defer cancel()
 
-	var err error
-	pub.client, err = pubsub.NewClient(ctx, config.ProjectID, config.ClientOptions...)
+	cc, errc, err := connect(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
+	select {
+	case <-ctx.Done():
+		return nil, ErrConnectTimeout
+	case pub.client = <-cc:
+	case err = <-errc:
+		return nil, err
+	}
+
 	return pub, nil
+}
+
+func connect(ctx context.Context, config PublisherConfig) (<-chan *pubsub.Client, <-chan error, error) {
+	out := make(chan *pubsub.Client)
+	errc := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errc)
+
+		// blocking
+		c, err := pubsub.NewClient(context.Background(), config.ProjectID, config.ClientOptions...)
+		if err != nil {
+			errc <- err
+			return
+		}
+		select {
+		case out <- c:
+			// ok, carry on
+		case <-ctx.Done():
+			return
+		}
+
+	}()
+
+	return out, errc, nil
 }
 
 // Publish publishes a set of messages on a Google Cloud Pub/Sub topic.
@@ -170,6 +207,7 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 	}()
 
 	t = p.client.Topic(topic)
+	t.EnableMessageOrdering = p.config.EnableMessageOrdering
 
 	// todo: theoretically, one could want different publish settings per topic, which is supported by the client lib
 	// different instances of publisher may be used then

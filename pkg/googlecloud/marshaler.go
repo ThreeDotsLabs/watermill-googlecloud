@@ -30,7 +30,7 @@ type MarshalerUnmarshaler interface {
 	Unmarshaler
 }
 
-func (m DefaultMarshalerUnmarshaler) Marshal(topic string, msg *message.Message) (*pubsub.Message, error) {
+func (DefaultMarshalerUnmarshaler) Marshal(topic string, msg *message.Message) (*pubsub.Message, error) {
 	if value := msg.Metadata.Get(UUIDHeaderKey); value != "" {
 		return nil, errors.Errorf("metadata %s is reserved by watermill for message UUID", UUIDHeaderKey)
 	}
@@ -51,7 +51,7 @@ func (m DefaultMarshalerUnmarshaler) Marshal(topic string, msg *message.Message)
 	return marshaledMsg, nil
 }
 
-func (u DefaultMarshalerUnmarshaler) Unmarshal(pubsubMsg *pubsub.Message) (*message.Message, error) {
+func (DefaultMarshalerUnmarshaler) Unmarshal(pubsubMsg *pubsub.Message) (*message.Message, error) {
 	metadata := make(message.Metadata, len(pubsubMsg.Attributes))
 
 	var id string
@@ -67,6 +67,64 @@ func (u DefaultMarshalerUnmarshaler) Unmarshal(pubsubMsg *pubsub.Message) (*mess
 
 	msg := message.NewMessage(id, pubsubMsg.Data)
 	msg.Metadata = metadata
+
+	return msg, nil
+}
+
+type GenerateOrderingKey func(topic string, msg *message.Message) (string, error)
+
+type orderingMarshaler struct {
+	Marshaler
+
+	generateOrderingKey GenerateOrderingKey
+}
+
+func NewOrderingMarshaler(generateOrderingKey GenerateOrderingKey) Marshaler {
+	return &orderingMarshaler{
+		Marshaler:           DefaultMarshalerUnmarshaler{},
+		generateOrderingKey: generateOrderingKey,
+	}
+}
+
+func (om orderingMarshaler) Marshal(topic string, msg *message.Message) (*pubsub.Message, error) {
+	marshaledMsg, err := om.Marshaler.Marshal(topic, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	orderingKey, err := om.generateOrderingKey(topic, msg)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot generate ordering key")
+	}
+	marshaledMsg.OrderingKey = orderingKey
+
+	return marshaledMsg, nil
+}
+
+type ExtractOrderingKey func(orderingKey string, msg *message.Message) error
+
+type orderingUnmarshaler struct {
+	Unmarshaler
+
+	extractOrderingKey ExtractOrderingKey
+}
+
+func NewOrderingUnmarshaler(extractOrderingKey ExtractOrderingKey) Unmarshaler {
+	return &orderingUnmarshaler{
+		Unmarshaler:        DefaultMarshalerUnmarshaler{},
+		extractOrderingKey: extractOrderingKey,
+	}
+}
+
+func (ou orderingUnmarshaler) Unmarshal(pubsubMsg *pubsub.Message) (*message.Message, error) {
+	msg, err := ou.Unmarshaler.Unmarshal(pubsubMsg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ou.extractOrderingKey(pubsubMsg.OrderingKey, msg); err != nil {
+		return nil, errors.Wrap(err, "cannot extract ordering key")
+	}
 
 	return msg, nil
 }

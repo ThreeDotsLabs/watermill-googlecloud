@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/cenkalti/backoff/v3"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
@@ -60,6 +61,11 @@ type SubscriberConfig struct {
 	// ProjectID is the Google Cloud Engine project ID.
 	ProjectID string
 
+	// TopicProjectID is an optionnal configuration value representing
+	// the underlying topic Google Cloud Engine project ID.
+	// This can be helpful when subscription is linked to a topic for another project.
+	TopicProjectID string
+
 	// If false (default), `Subscriber` tries to create a subscription if there is none with the requested name.
 	// Otherwise, trying to use non-existent subscription results in `ErrSubscriptionDoesNotExist`.
 	DoNotCreateSubscriptionIfMissing bool
@@ -83,6 +89,14 @@ type SubscriberConfig struct {
 	// Unmarshaler transforms the client library format into watermill/message.Message.
 	// Use a custom unmarshaler if needed, otherwise the default Unmarshaler should cover most use cases.
 	Unmarshaler Unmarshaler
+}
+
+func (sc SubscriberConfig) topicProjectID() string {
+	if sc.TopicProjectID != "" {
+		return sc.TopicProjectID
+	}
+
+	return sc.ProjectID
 }
 
 type SubscriptionNameFn func(topic string) string
@@ -166,16 +180,34 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 
 	sub, err := s.subscription(ctx, subscriptionName, topic)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
 	receiveFinished := make(chan struct{})
 	s.allSubscriptionsWaitGroup.Add(1)
 	go func() {
-		err := s.receive(ctx, sub, logFields, output)
-		if err != nil {
-			s.logger.Error("Receiving messages failed", err, logFields)
+		exponentialBackoff := backoff.NewExponentialBackOff()
+		exponentialBackoff.MaxElapsedTime = 0 // 0 means it never expires
+
+		if err := backoff.Retry(func() error {
+			err := s.receive(ctx, sub, logFields, output)
+			if err == nil {
+				s.logger.Info("Receiving messages finished with no error", logFields)
+				return nil
+			}
+
+			if s.getClosed() {
+				s.logger.Info("Receiving messages failed while closed", logFields)
+				return backoff.Permanent(err)
+			}
+
+			s.logger.Error("Receiving messages failed, retrying", err, logFields)
+			return err
+		}, exponentialBackoff); err != nil {
+			s.logger.Error("Retrying receiving messages failed", err, logFields)
 		}
+
 		close(receiveFinished)
 	}()
 
@@ -249,7 +281,7 @@ func (s *Subscriber) receive(
 	subcribeLogFields watermill.LogFields,
 	output chan *message.Message,
 ) error {
-	err := sub.Receive(ctx, func(ctx context.Context, pubsubMsg *pubsub.Message) {
+	return sub.Receive(ctx, func(ctx context.Context, pubsubMsg *pubsub.Message) {
 		logFields := subcribeLogFields.Copy()
 
 		msg, err := s.config.Unmarshaler.Unmarshal(pubsubMsg)
@@ -310,12 +342,6 @@ func (s *Subscriber) receive(
 			)
 		}
 	})
-
-	if err != nil && !s.getClosed() {
-		return err
-	}
-
-	return nil
 }
 
 // subscription obtains a subscription object.
@@ -411,7 +437,7 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
 	}
 
-	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.ProjectID, topic)
+	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.topicProjectID(), topic)
 
 	if config.Topic.String() != fullyQualifiedTopicName {
 		return nil, errors.Wrap(
