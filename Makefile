@@ -19,6 +19,12 @@ test_stress:
 test_reconnect:
 	go test -tags=reconnect ./...
 
+wait:
+	go run github.com/ThreeDotsLabs/watermill/dev/wait-for@github-actions localhost:8085
+
+build:
+	go build ./...
+
 fmt:
 	go fmt ./...
 	goimports -l -w .
