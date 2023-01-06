@@ -5,7 +5,7 @@ go 1.17
 require (
 	cloud.google.com/go v0.97.0 // indirect
 	cloud.google.com/go/pubsub v1.17.0
-	github.com/ThreeDotsLabs/watermill v1.2.0-rc.5
+	github.com/ThreeDotsLabs/watermill v1.2.0-rc.11
 	github.com/cenkalti/backoff/v3 v3.2.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/uuid v1.3.0 // indirect
