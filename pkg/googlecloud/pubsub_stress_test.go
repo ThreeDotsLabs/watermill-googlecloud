@@ -1,14 +1,14 @@
+//go:build stress
 // +build stress
 
 package googlecloud_test
 
 import (
-	"testing"
 	"runtime"
+	"testing"
 
 	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
 )
-
 
 func init() {
 	// Set GOMAXPROCS to double the number of CPUs
