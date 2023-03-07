@@ -42,6 +42,8 @@ type PublisherConfig struct {
 	DoNotCreateTopicIfMissing bool
 	// Enables the topic message ordering
 	EnableMessageOrdering bool
+	// Enables automatic resume publish upon error
+	EnableMessageOrderingAutoResumePublishOnError bool
 
 	// ConnectTimeout defines the timeout for connecting to Pub/Sub
 	ConnectTimeout time.Duration
@@ -162,6 +164,9 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 
 		_, err = result.Get(ctx)
 		if err != nil {
+			if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
+				t.ResumePublish(googlecloudMsg.OrderingKey)
+			}
 			return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
 		}
 
