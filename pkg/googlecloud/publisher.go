@@ -146,6 +146,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	if err != nil {
 		return err
 	}
+	t.EnableMessageOrdering = p.config.EnableMessageOrdering
 
 	logFields := make(watermill.LogFields, 2)
 	logFields["topic"] = topic
@@ -212,7 +213,6 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 	}()
 
 	t = p.client.Topic(topic)
-	t.EnableMessageOrdering = p.config.EnableMessageOrdering
 
 	// todo: theoretically, one could want different publish settings per topic, which is supported by the client lib
 	// different instances of publisher may be used then
