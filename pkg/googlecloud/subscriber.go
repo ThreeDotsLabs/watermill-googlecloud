@@ -75,6 +75,11 @@ type SubscriberConfig struct {
 	// Otherwise, trying to create a subscription on non-existent topic results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
 
+	// If false (default), when the subscription already exists, `Subscriber` will make sure that the subscription is
+	// attached to the provided topic, and will return a ErrUnexpectedTopic if not.
+	// Otherwise, it won't check to which topic the subscription is attached to.
+	DoNotEnforceSubscriptionAttachedToTopic bool
+
 	// deprecated: ConnectTimeout is no longer used, please use timeout on context in Subscribe() method
 	ConnectTimeout time.Duration
 
@@ -437,6 +442,12 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
 	}
 
+	sub.ReceiveSettings = s.config.ReceiveSettings
+
+	if s.config.DoNotEnforceSubscriptionAttachedToTopic {
+		return sub, nil
+	}
+
 	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.topicProjectID(), topic)
 
 	if config.Topic.String() != fullyQualifiedTopicName {
@@ -445,8 +456,6 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 			fmt.Sprintf("topic of existing sub: %s; expecting: %s", config.Topic.String(), fullyQualifiedTopicName),
 		)
 	}
-
-	sub.ReceiveSettings = s.config.ReceiveSettings
 
 	return sub, nil
 }
