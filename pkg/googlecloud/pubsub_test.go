@@ -176,6 +176,29 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	require.Equal(t, googlecloud.ErrUnexpectedTopic, errors.Cause(err))
 }
 
+func TestReceivedMessageContainsMessageId(t *testing.T) {
+	logger := watermill.NewStdLogger(true, true)
+
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	require.NoError(t, err)
+
+	topic := fmt.Sprintf("topic_%d", rand.Int())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	howManyMessages := 1
+	produceMessages(t, topic, howManyMessages)
+
+	msg := <-messages
+	if msg.Metadata.Get(googlecloud.GoogleMessageIdHeaderKey) == "" {
+		t.Fatalf("Message %s does not contain %s", msg.UUID, googlecloud.GoogleMessageIdHeaderKey)
+	}
+}
+
 func produceMessages(t *testing.T, topic string, howMany int) {
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
 	require.NoError(t, err)
