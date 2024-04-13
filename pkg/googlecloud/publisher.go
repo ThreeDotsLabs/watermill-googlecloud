@@ -163,13 +163,15 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		result := t.Publish(ctx, googlecloudMsg)
 		<-result.Ready()
 
-		_, err = result.Get(ctx)
+		serverMessageID, err := result.Get(ctx)
 		if err != nil {
 			if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
 				t.ResumePublish(googlecloudMsg.OrderingKey)
 			}
 			return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
 		}
+
+		msg.Metadata.Set(GoogleMessageIDHeaderKey, serverMessageID)
 
 		p.logger.Trace("Message published to Google PubSub", logFields)
 	}
