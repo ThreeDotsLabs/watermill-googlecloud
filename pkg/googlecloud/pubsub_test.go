@@ -194,8 +194,8 @@ func TestReceivedMessageContainsMessageId(t *testing.T) {
 	produceMessages(t, topic, howManyMessages)
 
 	msg := <-messages
-	if msg.Metadata.Get(googlecloud.GoogleMessageIdHeaderKey) == "" {
-		t.Fatalf("Message %s does not contain %s", msg.UUID, googlecloud.GoogleMessageIdHeaderKey)
+	if msg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey) == "" {
+		t.Fatalf("Message %s does not contain %s", msg.UUID, googlecloud.GoogleMessageIDHeaderKey)
 	}
 }
 
