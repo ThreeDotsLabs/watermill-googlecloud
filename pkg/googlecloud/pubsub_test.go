@@ -199,6 +199,41 @@ func TestReceivedMessageContainsMessageId(t *testing.T) {
 	}
 }
 
+func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
+	logger := watermill.NewStdLogger(true, true)
+	topic := fmt.Sprintf("topic_message_id_match_%d", rand.Int())
+
+	// Set up subscriber
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	require.NoError(t, err)
+
+	// Subscribe to the topic
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	// Set up publisher
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Publish a message
+	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
+	require.NoError(t, pub.Publish(topic, publishedMsg))
+	publishedMessageId := publishedMsg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey)
+
+	if publishedMessageId == "" {
+		t.Fatalf("Published message %s does not contain %s", publishedMsg.UUID, googlecloud.GoogleMessageIDHeaderKey)
+	}
+
+	receivedMsg := <-messages
+	receivedMessageId := receivedMsg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey)
+	if publishedMessageId != receivedMessageId {
+		t.Fatalf("Published message ID %s does not match received message ID %s", publishedMessageId, receivedMessageId)
+	}
+}
+
 func produceMessages(t *testing.T, topic string, howMany int) {
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
 	require.NoError(t, err)
