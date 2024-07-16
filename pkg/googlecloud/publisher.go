@@ -37,6 +37,9 @@ type PublisherConfig struct {
 	// ProjectID is the Google Cloud Engine project ID.
 	ProjectID string
 
+	// If true, `Publisher` does not check if the topic exists before publishing.
+	DoNotCheckTopicExistence bool
+
 	// If false (default), `Publisher` tries to create a topic if there is none with the requested name.
 	// Otherwise, trying to subscribe to non-existent subscription results in `ErrTopicDoesNotExist`.
 	DoNotCreateTopicIfMissing bool
@@ -220,6 +223,10 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 	// different instances of publisher may be used then
 	if p.config.PublishSettings != nil {
 		t.PublishSettings = *p.config.PublishSettings
+	}
+
+	if p.config.DoNotCheckTopicExistence {
+		return t, nil
 	}
 
 	exists, err := t.Exists(ctx)

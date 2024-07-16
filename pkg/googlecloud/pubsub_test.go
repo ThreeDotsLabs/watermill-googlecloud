@@ -234,6 +234,24 @@ func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
 	}
 }
 
+func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
+	topic := fmt.Sprintf("missing_topic_%d", rand.Int())
+
+	// Set up publisher
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		// DoNotCheckTopicExistence is set to true, so the publisher will not check
+		// if the topic exists and will also not attempt to create it.
+		DoNotCheckTopicExistence:  true,
+		DoNotCreateTopicIfMissing: false,
+	}, nil)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Publish a message
+	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
+	require.Error(t, pub.Publish(topic, publishedMsg), googlecloud.ErrTopicDoesNotExist)
+}
+
 func produceMessages(t *testing.T, topic string, howMany int) {
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
 	require.NoError(t, err)
