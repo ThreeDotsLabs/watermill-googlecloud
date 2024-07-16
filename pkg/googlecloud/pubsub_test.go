@@ -122,7 +122,6 @@ func TestPublishSubscribeOrdering(t *testing.T) {
 }
 
 func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
-	rand.Seed(time.Now().Unix())
 	testNumber := rand.Int()
 	logger := watermill.NewStdLogger(true, true)
 
