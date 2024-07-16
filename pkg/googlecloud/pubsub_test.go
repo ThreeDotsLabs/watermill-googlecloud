@@ -176,6 +176,82 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	require.Equal(t, googlecloud.ErrUnexpectedTopic, errors.Cause(err))
 }
 
+func TestReceivedMessageContainsMessageId(t *testing.T) {
+	logger := watermill.NewStdLogger(true, true)
+
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	require.NoError(t, err)
+
+	topic := fmt.Sprintf("topic_%d", rand.Int())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	howManyMessages := 1
+	produceMessages(t, topic, howManyMessages)
+
+	msg := <-messages
+	if msg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey) == "" {
+		t.Fatalf("Message %s does not contain %s", msg.UUID, googlecloud.GoogleMessageIDHeaderKey)
+	}
+}
+
+func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
+	logger := watermill.NewStdLogger(true, true)
+	topic := fmt.Sprintf("topic_message_id_match_%d", rand.Int())
+
+	// Set up subscriber
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	require.NoError(t, err)
+
+	// Subscribe to the topic
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	// Set up publisher
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Publish a message
+	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
+	require.NoError(t, pub.Publish(topic, publishedMsg))
+	publishedMessageId := publishedMsg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey)
+
+	if publishedMessageId == "" {
+		t.Fatalf("Published message %s does not contain %s", publishedMsg.UUID, googlecloud.GoogleMessageIDHeaderKey)
+	}
+
+	receivedMsg := <-messages
+	receivedMessageId := receivedMsg.Metadata.Get(googlecloud.GoogleMessageIDHeaderKey)
+	if publishedMessageId != receivedMessageId {
+		t.Fatalf("Published message ID %s does not match received message ID %s", publishedMessageId, receivedMessageId)
+	}
+}
+
+func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
+	topic := fmt.Sprintf("missing_topic_%d", rand.Int())
+
+	// Set up publisher
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		// DoNotCheckTopicExistence is set to true, so the publisher will not check
+		// if the topic exists and will also not attempt to create it.
+		DoNotCheckTopicExistence:  true,
+		DoNotCreateTopicIfMissing: false,
+	}, nil)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Publish a message
+	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
+	require.Error(t, pub.Publish(topic, publishedMsg), googlecloud.ErrTopicDoesNotExist)
+}
+
 func produceMessages(t *testing.T, topic string, howMany int) {
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
 	require.NoError(t, err)
