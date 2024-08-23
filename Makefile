@@ -21,6 +21,9 @@ test_stress:
 test_reconnect:
 	go test -tags=reconnect ./...
 
+test_codecov: up wait
+	go test -coverprofile=coverage.out -covermode=atomic ./...
+
 wait:
 	go run github.com/ThreeDotsLabs/wait-for@latest localhost:8085
 
