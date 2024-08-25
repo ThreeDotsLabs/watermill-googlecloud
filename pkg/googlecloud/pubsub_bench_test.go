@@ -16,7 +16,9 @@ func BenchmarkSubscriber(b *testing.B) {
 		logger := watermill.NopLogger{}
 
 		publisher, err := googlecloud.NewPublisher(
-			googlecloud.PublisherConfig{},
+			googlecloud.PublisherConfig{
+				ProjectID: "tests",
+			},
 			logger,
 		)
 		if err != nil {
@@ -24,7 +26,9 @@ func BenchmarkSubscriber(b *testing.B) {
 		}
 
 		subscriber, err := googlecloud.NewSubscriber(
-			googlecloud.SubscriberConfig{},
+			googlecloud.SubscriberConfig{
+				ProjectID: "tests",
+			},
 			logger,
 		)
 		if err != nil {
