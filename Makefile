@@ -1,7 +1,7 @@
 include: .env
 
 up:
-	docker-compose up -d
+	docker compose up -d
 
 test:
 	go test ./...
