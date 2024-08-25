@@ -20,6 +20,10 @@ type Unmarshaler interface {
 // UUIDHeaderKey is the key of the Pub/Sub attribute that carries Waterfall UUID.
 const UUIDHeaderKey = "_watermill_message_uuid"
 
+// GoogleMessageIDHeaderKey is the key of the Pub/Sub attribute that carries Google Cloud Message ID.
+// This ID is assigned by the server when the message is published and is guaranteed to be unique within the topic.
+const GoogleMessageIDHeaderKey = "_watermill_message_google_message_id"
+
 // DefaultMarshalerUnmarshaler implements Marshaler and Unmarshaler in the following way:
 // All Google Cloud Pub/Sub attributes are equivalent to Waterfall Message metadata.
 // Waterfall Message UUID is equivalent to an attribute with `UUIDHeaderKey` as key.
@@ -64,6 +68,7 @@ func (DefaultMarshalerUnmarshaler) Unmarshal(pubsubMsg *pubsub.Message) (*messag
 	}
 
 	metadata.Set("publishTime", pubsubMsg.PublishTime.String())
+	metadata.Set(GoogleMessageIDHeaderKey, pubsubMsg.ID)
 
 	msg := message.NewMessage(id, pubsubMsg.Data)
 	msg.Metadata = metadata

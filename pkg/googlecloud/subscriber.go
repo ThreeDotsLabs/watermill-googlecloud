@@ -181,7 +181,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	}
 	s.logger.Info("Subscribing to Google Cloud PubSub topic", logFields)
 
-	output := make(chan *message.Message, 0)
+	output := make(chan *message.Message)
 
 	sub, err := s.subscription(ctx, subscriptionName, topic)
 	if err != nil {
