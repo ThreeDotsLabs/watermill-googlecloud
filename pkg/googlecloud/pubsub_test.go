@@ -3,14 +3,14 @@ package googlecloud_test
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
