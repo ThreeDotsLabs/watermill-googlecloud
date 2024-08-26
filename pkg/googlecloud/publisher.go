@@ -210,8 +210,8 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 
 	p.topicsLock.Lock()
 	defer func() {
-		t.EnableMessageOrdering = p.config.EnableMessageOrdering
 		if err == nil {
+			t.EnableMessageOrdering = p.config.EnableMessageOrdering
 			p.topics[topic] = t
 		}
 		p.topicsLock.Unlock()
