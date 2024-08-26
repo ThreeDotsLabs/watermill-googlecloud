@@ -149,7 +149,6 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	if err != nil {
 		return err
 	}
-	t.EnableMessageOrdering = p.config.EnableMessageOrdering
 
 	logFields := make(watermill.LogFields, 2)
 	logFields["topic"] = topic
@@ -211,6 +210,7 @@ func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, e
 
 	p.topicsLock.Lock()
 	defer func() {
+		t.EnableMessageOrdering = p.config.EnableMessageOrdering
 		if err == nil {
 			p.topics[topic] = t
 		}

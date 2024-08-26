@@ -3,6 +3,8 @@ package googlecloud_test
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"testing"
 	"time"
@@ -275,4 +277,66 @@ func produceMessages(t *testing.T, topic string, howMany int) {
 	}
 
 	require.NoError(t, pub.Publish(topic, messages...))
+}
+
+func TestPublishOrdering(t *testing.T) {
+	t.Skip("to investigate")
+
+	pub, sub := newPubSub(
+		t,
+		true,
+		googlecloud.NewOrderingMarshaler(func(topic string, msg *message.Message) (string, error) {
+			return msg.Metadata["ordering"], nil
+		}),
+		googlecloud.NewOrderingUnmarshaler(func(orderingKey string, msg *message.Message) error {
+			return nil
+		}),
+		googlecloud.TopicSubscriptionNameWithSuffix("TestPublishOrdering"),
+	)
+
+	defer func() {
+		_ = pub.Close()
+		_ = sub.Close()
+	}()
+
+	topic := fmt.Sprintf("topic_ordering_%v", uuid.NewString())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	newMsg := func(id string, ordering string) *message.Message {
+		msg := message.NewMessage(id, []byte{})
+		msg.Metadata["ordering"] = ordering
+		return msg
+	}
+
+	toPublish := []*message.Message{
+		newMsg("1", "A"),
+		newMsg("2", "A"),
+		newMsg("3", "B"),
+		newMsg("4", "B"),
+	}
+
+	for i := range toPublish {
+		err := pub.Publish(topic, toPublish[i])
+		require.NoError(t, err)
+	}
+
+	received := map[string][]string{}
+
+	for i := 0; i < len(toPublish); i++ {
+		select {
+		case msg := <-messages:
+			received[msg.Metadata["ordering"]] = append(received[msg.Metadata["ordering"]], msg.UUID)
+			msg.Ack()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
+	}
+
+	assert.Equal(t, []string{"1", "2"}, received["A"])
+	assert.Equal(t, []string{"3", "4"}, received["B"])
 }
