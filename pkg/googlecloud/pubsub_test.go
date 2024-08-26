@@ -280,8 +280,6 @@ func produceMessages(t *testing.T, topic string, howMany int) {
 }
 
 func TestPublishOrdering(t *testing.T) {
-	t.Skip("to investigate")
-
 	pub, sub := newPubSub(
 		t,
 		true,
@@ -330,7 +328,8 @@ func TestPublishOrdering(t *testing.T) {
 	for i := 0; i < len(toPublish); i++ {
 		select {
 		case msg := <-messages:
-			received[msg.Metadata["ordering"]] = append(received[msg.Metadata["ordering"]], msg.UUID)
+			key := msg.Metadata["ordering"]
+			received[key] = append(received[key], msg.UUID)
 			msg.Ack()
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout")
