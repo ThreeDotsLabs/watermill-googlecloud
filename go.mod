@@ -7,7 +7,7 @@ toolchain go1.22.5
 require (
 	cloud.google.com/go v0.115.1 // indirect
 	cloud.google.com/go/pubsub v1.42.0
-	github.com/ThreeDotsLabs/watermill v1.3.7-0.20240825190701-6ffcf45dc0f5
+	github.com/ThreeDotsLabs/watermill v1.3.7-0.20240826102507-f2b62e21a34c
 	github.com/cenkalti/backoff/v3 v3.2.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/uuid v1.6.0 // indirect
