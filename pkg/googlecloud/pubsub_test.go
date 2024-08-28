@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
@@ -24,6 +26,7 @@ func newPubSub(t *testing.T, enableMessageOrdering bool, marshaler googlecloud.M
 
 	publisher, err := googlecloud.NewPublisher(
 		googlecloud.PublisherConfig{
+			ProjectID:             "tests",
 			EnableMessageOrdering: enableMessageOrdering,
 			Marshaler:             marshaler,
 		},
@@ -33,6 +36,7 @@ func newPubSub(t *testing.T, enableMessageOrdering bool, marshaler googlecloud.M
 
 	subscriber, err := googlecloud.NewSubscriber(
 		googlecloud.SubscriberConfig{
+			ProjectID:                "tests",
 			GenerateSubscriptionName: subscriptionName,
 			SubscriptionConfig: pubsub.SubscriptionConfig{
 				RetainAckedMessages:   false,
@@ -158,7 +162,6 @@ func TestSubscriberAllowedWhenAttachedToAnotherTopic(t *testing.T) {
 }
 
 func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
-	rand.Seed(time.Now().Unix())
 	testNumber := rand.Int()
 	logger := watermill.NewStdLogger(true, true)
 
@@ -167,6 +170,7 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	}
 
 	sub1, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID:                "tests",
 		GenerateSubscriptionName: subNameFn,
 	}, logger)
 	require.NoError(t, err)
@@ -174,6 +178,7 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	topic1 := fmt.Sprintf("topic1_%d", testNumber)
 
 	sub2, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID:                "tests",
 		GenerateSubscriptionName: subNameFn,
 	}, logger)
 	require.NoError(t, err)
@@ -215,7 +220,9 @@ func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 func TestReceivedMessageContainsMessageId(t *testing.T) {
 	logger := watermill.NewStdLogger(true, true)
 
-	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID: "tests",
+	}, logger)
 	require.NoError(t, err)
 
 	topic := fmt.Sprintf("topic_%d", rand.Int())
@@ -240,7 +247,9 @@ func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
 	topic := fmt.Sprintf("topic_message_id_match_%d", rand.Int())
 
 	// Set up subscriber
-	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{}, logger)
+	sub, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID: "tests",
+	}, logger)
 	require.NoError(t, err)
 
 	// Subscribe to the topic
@@ -250,7 +259,9 @@ func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set up publisher
-	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		ProjectID: "tests",
+	}, nil)
 	require.NoError(t, err)
 	defer pub.Close()
 
@@ -275,6 +286,7 @@ func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
 
 	// Set up publisher
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		ProjectID: "tests",
 		// DoNotCheckTopicExistence is set to true, so the publisher will not check
 		// if the topic exists and will also not attempt to create it.
 		DoNotCheckTopicExistence:  true,
@@ -289,7 +301,9 @@ func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
 }
 
 func produceMessages(t *testing.T, topic string, howMany int) {
-	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{}, nil)
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		ProjectID: "tests",
+	}, nil)
 	require.NoError(t, err)
 	defer pub.Close()
 
@@ -299,4 +313,65 @@ func produceMessages(t *testing.T, topic string, howMany int) {
 	}
 
 	require.NoError(t, pub.Publish(topic, messages...))
+}
+
+func TestPublishOrdering(t *testing.T) {
+	pub, sub := newPubSub(
+		t,
+		true,
+		googlecloud.NewOrderingMarshaler(func(topic string, msg *message.Message) (string, error) {
+			return msg.Metadata["ordering"], nil
+		}),
+		googlecloud.NewOrderingUnmarshaler(func(orderingKey string, msg *message.Message) error {
+			return nil
+		}),
+		googlecloud.TopicSubscriptionNameWithSuffix("TestPublishOrdering"),
+	)
+
+	defer func() {
+		_ = pub.Close()
+		_ = sub.Close()
+	}()
+
+	topic := fmt.Sprintf("topic_ordering_%v", uuid.NewString())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	messages, err := sub.Subscribe(ctx, topic)
+	require.NoError(t, err)
+
+	newMsg := func(id string, ordering string) *message.Message {
+		msg := message.NewMessage(id, []byte{})
+		msg.Metadata["ordering"] = ordering
+		return msg
+	}
+
+	toPublish := []*message.Message{
+		newMsg("1", "A"),
+		newMsg("2", "A"),
+		newMsg("3", "B"),
+		newMsg("4", "B"),
+	}
+
+	for i := range toPublish {
+		err := pub.Publish(topic, toPublish[i])
+		require.NoError(t, err)
+	}
+
+	received := map[string][]string{}
+
+	for i := 0; i < len(toPublish); i++ {
+		select {
+		case msg := <-messages:
+			key := msg.Metadata["ordering"]
+			received[key] = append(received[key], msg.UUID)
+			msg.Ack()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
+	}
+
+	assert.Equal(t, []string{"1", "2"}, received["A"])
+	assert.Equal(t, []string{"3", "4"}, received["B"])
 }
