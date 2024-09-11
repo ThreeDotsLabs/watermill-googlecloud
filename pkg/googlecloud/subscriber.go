@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/pubsub"
@@ -32,9 +33,8 @@ var (
 //
 // For more info on how Google Cloud Pub/Sub Subscribers work, check https://cloud.google.com/pubsub/docs/subscriber.
 type Subscriber struct {
-	closing    chan struct{}
-	closed     bool
-	closedLock sync.Mutex
+	closing chan struct{}
+	closed  atomic.Bool
 
 	allSubscriptionsWaitGroup sync.WaitGroup
 	activeSubscriptions       map[string]*pubsub.Subscription
@@ -136,9 +136,7 @@ func NewSubscriber(
 	}
 
 	return &Subscriber{
-		closing:    make(chan struct{}, 1),
-		closed:     false,
-		closedLock: sync.Mutex{},
+		closing: make(chan struct{}, 1),
 
 		allSubscriptionsWaitGroup: sync.WaitGroup{},
 		activeSubscriptions:       map[string]*pubsub.Subscription{},
@@ -162,7 +160,7 @@ func NewSubscriber(
 //
 // See https://cloud.google.com/pubsub/docs/subscriber to find out more about how Google Cloud Pub/Sub Subscriptions work.
 func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	if s.getClosed() {
+	if s.closed.Load() {
 		return nil, ErrSubscriberClosed
 	}
 
@@ -197,7 +195,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 				return nil
 			}
 
-			if s.getClosed() {
+			if s.closed.Load() {
 				s.logger.Info("Receiving messages failed while closed", logFields)
 				return backoff.Permanent(err)
 			}
@@ -248,12 +246,12 @@ func (s *Subscriber) SubscribeInitialize(topic string) (err error) {
 // Close notifies the Subscriber to stop processing messages on all subscriptions, close all the output channels
 // and terminate the connection.
 func (s *Subscriber) Close() error {
-	if s.getClosed() {
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	s.setClosed(true)
 	close(s.closing)
+
 	s.allSubscriptionsWaitGroup.Wait()
 
 	s.clientsLock.Lock()
@@ -449,18 +447,4 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 	sub.ReceiveSettings = s.config.ReceiveSettings
 
 	return sub, nil
-}
-
-func (s *Subscriber) setClosed(value bool) {
-	s.closedLock.Lock()
-	defer s.closedLock.Unlock()
-
-	s.closed = value
-}
-
-func (s *Subscriber) getClosed() bool {
-	s.closedLock.Lock()
-	defer s.closedLock.Unlock()
-
-	return s.closed
 }
