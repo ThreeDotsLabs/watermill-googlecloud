@@ -56,6 +56,7 @@ type PublisherConfig struct {
 	// Settings for cloud.google.com/go/pubsub client library.
 	PublishSettings *pubsub.PublishSettings
 	ClientOptions   []option.ClientOption
+	ClientConfig    *pubsub.ClientConfig
 
 	Marshaler Marshaler
 }
@@ -113,7 +114,7 @@ func connect(ctx context.Context, config PublisherConfig) (<-chan *pubsub.Client
 		defer close(errc)
 
 		// blocking
-		c, err := pubsub.NewClient(context.Background(), config.ProjectID, config.ClientOptions...)
+		c, err := pubsub.NewClientWithConfig(context.Background(), config.ProjectID, config.ClientConfig, config.ClientOptions...)
 		if err != nil {
 			errc <- err
 			return

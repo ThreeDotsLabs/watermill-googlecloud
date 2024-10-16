@@ -85,6 +85,7 @@ type SubscriberConfig struct {
 	ReceiveSettings    pubsub.ReceiveSettings
 	SubscriptionConfig pubsub.SubscriptionConfig
 	ClientOptions      []option.ClientOption
+	ClientConfig       *pubsub.ClientConfig
 
 	// Unmarshaler transforms the client library format into watermill/message.Message.
 	// Use a custom unmarshaler if needed, otherwise the default Unmarshaler should cover most use cases.
@@ -417,7 +418,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 }
 
 func (s *Subscriber) newClient(ctx context.Context) (*pubsub.Client, error) {
-	client, err := pubsub.NewClient(ctx, s.config.ProjectID, s.config.ClientOptions...)
+	client, err := pubsub.NewClientWithConfig(ctx, s.config.ProjectID, s.config.ClientConfig, s.config.ClientOptions...)
 	if err != nil {
 		return nil, err
 	}
