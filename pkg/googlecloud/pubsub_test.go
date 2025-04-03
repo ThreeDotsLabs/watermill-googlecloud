@@ -125,6 +125,42 @@ func TestPublishSubscribeOrdering(t *testing.T) {
 	)
 }
 
+func TestSubscriberAllowedWhenAttachedToAnotherTopic(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+	testNumber := rand.Int()
+	logger := watermill.NewStdLogger(true, true)
+
+	subNameFn := func(topic string) string {
+		return fmt.Sprintf("sub_%d", testNumber)
+	}
+
+	sub1, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		GenerateSubscriptionName: subNameFn,
+	}, logger)
+	require.NoError(t, err)
+
+	topic1 := fmt.Sprintf("topic1_%d", testNumber)
+
+	sub2, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		GenerateSubscriptionName:                subNameFn,
+		DoNotEnforceSubscriptionAttachedToTopic: true,
+	}, logger)
+	require.NoError(t, err)
+	topic2 := fmt.Sprintf("topic2_%d", testNumber)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err = sub1.Subscribe(ctx, topic1)
+	require.NoError(t, err)
+
+	// without the DoNotEnforceSubscriptionAttachedToTopic, this call would fail because subNameFn will return the
+	// same value for both sub1 and sub2, and sub1 will create a subscription and topic attached to each other
+	// making sub2.Subscribe fail because the requested subscription (topic2) is not attached to the GCP topic
+	_, err = sub2.Subscribe(ctx, topic2)
+	require.NoError(t, err)
+}
+
 func TestSubscriberUnexpectedTopicForSubscription(t *testing.T) {
 	testNumber := rand.Int()
 	logger := watermill.NewStdLogger(true, true)
