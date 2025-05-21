@@ -257,9 +257,11 @@ func (s *Subscriber) Close() error {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
 
-	err := s.client.Close()
-	if err != nil {
-		return fmt.Errorf("closing client: %w", err)
+	if s.client != nil {
+		err := s.client.Close()
+		if err != nil {
+			return fmt.Errorf("closing client: %w", err)
+		}
 	}
 
 	s.logger.Debug("Google Cloud PubSub subscriber closed", nil)
