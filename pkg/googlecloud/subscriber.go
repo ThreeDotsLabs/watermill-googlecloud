@@ -9,7 +9,6 @@ import (
 
 	"cloud.google.com/go/pubsub"
 	"github.com/cenkalti/backoff/v3"
-	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -40,8 +39,8 @@ type Subscriber struct {
 	activeSubscriptions       map[string]*pubsub.Subscription
 	activeSubscriptionsLock   sync.RWMutex
 
-	clients     []*pubsub.Client
-	clientsLock sync.RWMutex
+	client     *pubsub.Client
+	clientLock sync.RWMutex
 
 	config SubscriberConfig
 
@@ -92,12 +91,12 @@ type SubscriberConfig struct {
 	Unmarshaler Unmarshaler
 }
 
-func (sc SubscriberConfig) topicProjectID() string {
-	if sc.TopicProjectID != "" {
-		return sc.TopicProjectID
+func (c *SubscriberConfig) topicProjectID() string {
+	if c.TopicProjectID != "" {
+		return c.TopicProjectID
 	}
 
-	return sc.ProjectID
+	return c.ProjectID
 }
 
 type SubscriptionNameFn func(topic string) string
@@ -255,18 +254,14 @@ func (s *Subscriber) Close() error {
 
 	s.allSubscriptionsWaitGroup.Wait()
 
-	s.clientsLock.Lock()
-	defer s.clientsLock.Unlock()
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
 
-	var err error
-	for _, client := range s.clients {
-		closeErr := client.Close()
-		if closeErr != nil {
-			err = multierror.Append(err, errors.Wrap(closeErr, "unable to close client"))
+	if s.client != nil {
+		err := s.client.Close()
+		if err != nil {
+			return fmt.Errorf("closing client: %w", err)
 		}
-	}
-	if err != nil {
-		return err
 	}
 
 	s.logger.Debug("Google Cloud PubSub subscriber closed", nil)
@@ -361,12 +356,12 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		}
 	}()
 
-	client, err := s.newClient(ctx)
+	err = s.initClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "could not initialize client")
 	}
 
-	sub = client.Subscription(subscriptionName)
+	sub = s.client.Subscription(subscriptionName)
 	exists, err := sub.Exists(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if subscription %s exists", subscriptionName)
@@ -380,7 +375,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		return nil, errors.Wrap(ErrSubscriptionDoesNotExist, subscriptionName)
 	}
 
-	t := client.Topic(topicName)
+	t := s.client.Topic(topicName)
 	exists, err = t.Exists(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topicName)
@@ -391,11 +386,11 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	}
 
 	if !exists {
-		t, err = client.CreateTopic(ctx, topicName)
+		t, err = s.client.CreateTopic(ctx, topicName)
 
 		if status.Code(err) == codes.AlreadyExists {
 			s.logger.Debug("Topic already exists", watermill.LogFields{"topic": topicName})
-			t = client.Topic(topicName)
+			t = s.client.Topic(topicName)
 		} else if err != nil {
 			return nil, errors.Wrap(err, "could not create topic for subscription")
 		}
@@ -404,10 +399,10 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	config := s.config.SubscriptionConfig
 	config.Topic = t
 
-	sub, err = client.CreateSubscription(ctx, subscriptionName, config)
+	sub, err = s.client.CreateSubscription(ctx, subscriptionName, config)
 	if status.Code(err) == codes.AlreadyExists {
 		s.logger.Debug("Subscription already exists", watermill.LogFields{"subscription": subscriptionName})
-		sub = client.Subscription(subscriptionName)
+		sub = s.client.Subscription(subscriptionName)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "cannot create subscription")
 	}
@@ -417,17 +412,22 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	return sub, nil
 }
 
-func (s *Subscriber) newClient(ctx context.Context) (*pubsub.Client, error) {
-	client, err := pubsub.NewClientWithConfig(ctx, s.config.ProjectID, s.config.ClientConfig, s.config.ClientOptions...)
-	if err != nil {
-		return nil, err
+func (s *Subscriber) initClient(ctx context.Context) error {
+	s.clientLock.Lock()
+	defer s.clientLock.Unlock()
+
+	if s.client != nil {
+		return nil
 	}
 
-	s.clientsLock.Lock()
-	s.clients = append(s.clients, client)
-	s.clientsLock.Unlock()
+	c, err := pubsub.NewClientWithConfig(ctx, s.config.ProjectID, s.config.ClientConfig, s.config.ClientOptions...)
+	if err != nil {
+		return fmt.Errorf("could not create client: %w", err)
+	}
 
-	return client, nil
+	s.client = c
+
+	return nil
 }
 
 func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
