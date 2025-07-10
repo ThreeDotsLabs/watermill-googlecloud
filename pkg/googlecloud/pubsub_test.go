@@ -264,6 +264,25 @@ func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
 	require.Error(t, pub.Publish(topic, publishedMsg), googlecloud.ErrTopicDoesNotExist)
 }
 
+func TestPublisherTimeout(t *testing.T) {
+	topic := fmt.Sprintf("any_topic")
+
+	// Set up publisher
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		ProjectID:                 "tests",
+		DoNotCheckTopicExistence:  true,
+		DoNotCreateTopicIfMissing: true,
+		PublishTimeout:            time.Nanosecond,
+	}, nil)
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Publish a message
+	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
+	err = pub.Publish(topic, publishedMsg)
+	assert.ErrorContains(t, err, "context deadline exceeded")
+}
+
 func produceMessages(t *testing.T, topic string, howMany int) {
 	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
 		ProjectID: "tests",

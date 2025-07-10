@@ -164,7 +164,6 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		}
 
 		result := t.Publish(ctx, googlecloudMsg)
-		<-result.Ready()
 
 		serverMessageID, err := result.Get(ctx)
 		if err != nil {
