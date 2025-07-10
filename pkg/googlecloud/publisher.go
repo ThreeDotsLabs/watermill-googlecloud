@@ -2,6 +2,8 @@ package googlecloud
 
 import (
 	"context"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"sync"
 	"time"
 
@@ -31,6 +33,8 @@ type Publisher struct {
 	config PublisherConfig
 
 	logger watermill.LoggerAdapter
+
+	propagator propagation.TextMapPropagator
 }
 
 type PublisherConfig struct {
@@ -81,9 +85,10 @@ func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publ
 	}
 
 	pub := &Publisher{
-		topics: map[string]*pubsub.Topic{},
-		config: config,
-		logger: logger,
+		topics:     map[string]*pubsub.Topic{},
+		config:     config,
+		logger:     logger,
+		propagator: otel.GetTextMapPropagator(),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
@@ -163,9 +168,11 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 			return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
 		}
 
-		result := t.Publish(ctx, googlecloudMsg)
+		publishCtx := p.extractTracing(ctx, msg)
 
-		serverMessageID, err := result.Get(ctx)
+		result := t.Publish(publishCtx, googlecloudMsg)
+
+		serverMessageID, err := result.Get(publishCtx)
 		if err != nil {
 			if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
 				t.ResumePublish(googlecloudMsg.OrderingKey)
@@ -179,6 +186,16 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	}
 
 	return nil
+}
+
+// extractTracing extracts tracing information from the message metadata and injects it into the context,
+// if OpenTelemetry tracing is enabled in the publisher configuration.
+func (p *Publisher) extractTracing(ctx context.Context, msg *message.Message) context.Context {
+	if p.config.ClientConfig != nil && p.config.ClientConfig.EnableOpenTelemetryTracing {
+		return p.propagator.Extract(ctx, propagation.MapCarrier(msg.Metadata))
+	}
+
+	return ctx
 }
 
 // Close notifies the Publisher to stop processing messages, send all the remaining messages and close the connection.
