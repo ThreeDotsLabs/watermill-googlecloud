@@ -2,6 +2,7 @@ package googlecloud
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -233,7 +234,7 @@ func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Pu
 		return pub, nil
 	}
 
-	exists, err := topicExists(ctx, p.client, topic)
+	exists, err := topicExists(ctx, p.client, p.config.ProjectID, topic)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topic)
 	}
@@ -247,7 +248,7 @@ func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Pu
 	}
 
 	_, err = p.client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{
-		Name: topic,
+		Name: fullyQualifiedTopicName(p.config.ProjectID, topic),
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not create topic %s", topic)
@@ -256,9 +257,9 @@ func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Pu
 	return pub, nil
 }
 
-func topicExists(ctx context.Context, client *pubsub.Client, topic string) (bool, error) {
+func topicExists(ctx context.Context, client *pubsub.Client, projectID string, topic string) (bool, error) {
 	_, err := client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{
-		Topic: topic,
+		Topic: fullyQualifiedTopicName(projectID, topic),
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
@@ -267,4 +268,8 @@ func topicExists(ctx context.Context, client *pubsub.Client, topic string) (bool
 		return false, errors.Wrapf(err, "could not check if topic %s exists", topic)
 	}
 	return true, nil
+}
+
+func fullyQualifiedTopicName(projectID string, topic string) string {
+	return fmt.Sprintf("projects/%s/topics/%s", projectID, topic)
 }

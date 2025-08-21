@@ -384,7 +384,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	sub = s.client.Subscriber(subscriptionName)
 
 	subResp, err := s.client.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
-		Subscription: subscriptionName,
+		Subscription: fullyQualifiedSubscriptionName(s.config.ProjectID, subscriptionName),
 	})
 	if err == nil {
 		return s.existingSubscriber(sub, subResp, topicName)
@@ -400,7 +400,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		return nil, errors.Wrap(ErrSubscriptionDoesNotExist, subscriptionName)
 	}
 
-	tExists, err := topicExists(ctx, s.client, topicName)
+	tExists, err := topicExists(ctx, s.client, s.config.ProjectID, topicName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topicName)
 	}
@@ -411,7 +411,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 
 	if !tExists {
 		_, err = s.client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{
-			Name: topicName,
+			Name: fullyQualifiedTopicName(s.config.topicProjectID(), topicName),
 		})
 
 		if status.Code(err) == codes.AlreadyExists {
@@ -422,8 +422,8 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 	}
 
 	subConfig := s.config.GenerateSubscription(GenerateSubscriptionParams{})
-	subConfig.Name = subscriptionName
-	subConfig.Topic = topicName
+	subConfig.Name = fullyQualifiedSubscriptionName(s.config.ProjectID, subscriptionName)
+	subConfig.Topic = fullyQualifiedTopicName(s.config.topicProjectID(), topicName)
 
 	_, err = s.client.SubscriptionAdminClient.CreateSubscription(ctx, subConfig)
 	if status.Code(err) == codes.AlreadyExists {
@@ -462,12 +462,12 @@ func (s *Subscriber) existingSubscriber(sub *pubsub.Subscriber, subscription *pu
 		return sub, nil
 	}
 
-	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.topicProjectID(), topic)
+	fullName := fullyQualifiedTopicName(s.config.topicProjectID(), topic)
 
-	if subscription.Topic != fullyQualifiedTopicName {
+	if subscription.Topic != fullName {
 		return nil, errors.Wrap(
 			ErrUnexpectedTopic,
-			fmt.Sprintf("topic of existing sub: %s; expecting: %s", subscription.Topic, fullyQualifiedTopicName),
+			fmt.Sprintf("topic of existing sub: %s; expecting: %s", subscription.Topic, fullName),
 		)
 	}
 
@@ -577,4 +577,8 @@ func subscriptionFromSubscriptionConfig(cfg pubsubv1.SubscriptionConfig) *pubsub
 		AnalyticsHubSubscriptionInfo:  nil, // Unmapped
 		MessageTransforms:             messageTransforms,
 	}
+}
+
+func fullyQualifiedSubscriptionName(projectID, subscriptionName string) string {
+	return fmt.Sprintf("projects/%s/subscriptions/%s", projectID, subscriptionName)
 }
