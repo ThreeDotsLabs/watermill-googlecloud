@@ -5,9 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -23,7 +26,7 @@ var (
 )
 
 type Publisher struct {
-	topics     map[string]*pubsub.Topic
+	publishers map[string]*pubsub.Publisher
 	topicsLock sync.RWMutex
 	closed     bool
 
@@ -81,9 +84,9 @@ func NewPublisher(config PublisherConfig, logger watermill.LoggerAdapter) (*Publ
 	}
 
 	pub := &Publisher{
-		topics: map[string]*pubsub.Topic{},
-		config: config,
-		logger: logger,
+		publishers: map[string]*pubsub.Publisher{},
+		config:     config,
+		logger:     logger,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.ConnectTimeout)
@@ -146,7 +149,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), p.config.PublishTimeout)
 	defer cancel()
 
-	t, err := p.topic(ctx, topic)
+	pub, err := p.publisher(ctx, topic)
 	if err != nil {
 		return err
 	}
@@ -163,13 +166,13 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 			return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
 		}
 
-		result := t.Publish(ctx, googlecloudMsg)
+		result := pub.Publish(ctx, googlecloudMsg)
 		<-result.Ready()
 
 		serverMessageID, err := result.Get(ctx)
 		if err != nil {
 			if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
-				t.ResumePublish(googlecloudMsg.OrderingKey)
+				pub.ResumePublish(googlecloudMsg.OrderingKey)
 			}
 			return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
 		}
@@ -193,7 +196,7 @@ func (p *Publisher) Close() error {
 	p.closed = true
 
 	p.topicsLock.Lock()
-	for _, t := range p.topics {
+	for _, t := range p.publishers {
 		t.Stop()
 	}
 	p.topicsLock.Unlock()
@@ -201,52 +204,67 @@ func (p *Publisher) Close() error {
 	return p.client.Close()
 }
 
-func (p *Publisher) topic(ctx context.Context, topic string) (t *pubsub.Topic, err error) {
+func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Publisher, err error) {
 	p.topicsLock.RLock()
-	t, ok := p.topics[topic]
+	pub, ok := p.publishers[topic]
 	p.topicsLock.RUnlock()
 	if ok {
-		return t, nil
+		return pub, nil
 	}
 
 	p.topicsLock.Lock()
 	defer func() {
 		if err == nil {
-			t.EnableMessageOrdering = p.config.EnableMessageOrdering
-			p.topics[topic] = t
+			pub.EnableMessageOrdering = p.config.EnableMessageOrdering
+			p.publishers[topic] = pub
 		}
 		p.topicsLock.Unlock()
 	}()
 
-	t = p.client.Topic(topic)
+	pub = p.client.Publisher(topic)
 
 	// todo: theoretically, one could want different publish settings per topic, which is supported by the client lib
 	// different instances of publisher may be used then
 	if p.config.PublishSettings != nil {
-		t.PublishSettings = *p.config.PublishSettings
+		pub.PublishSettings = *p.config.PublishSettings
 	}
 
 	if p.config.DoNotCheckTopicExistence {
-		return t, nil
+		return pub, nil
 	}
 
-	exists, err := t.Exists(ctx)
+	exists, err := topicExists(ctx, p.client, topic)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topic)
 	}
 
 	if exists {
-		return t, nil
+		return pub, nil
 	}
 
 	if p.config.DoNotCreateTopicIfMissing {
 		return nil, errors.Wrap(ErrTopicDoesNotExist, topic)
 	}
 
-	t, err = p.client.CreateTopic(ctx, topic)
+	_, err = p.client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{
+		Name: topic,
+	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not create topic %s", topic)
 	}
 
-	return t, nil
+	return pub, nil
+}
+
+func topicExists(ctx context.Context, client *pubsub.Client, topic string) (bool, error) {
+	_, err := client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{
+		Topic: topic,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return false, nil
+		}
+		return false, errors.Wrapf(err, "could not check if topic %s exists", topic)
+	}
+	return true, nil
 }

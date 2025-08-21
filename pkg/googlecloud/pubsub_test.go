@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill-googlecloud/pkg/googlecloud"
+	"github.com/ThreeDotsLabs/watermill-googlecloud/v2/pkg/googlecloud"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
 )
@@ -38,9 +38,11 @@ func newPubSub(t *testing.T, enableMessageOrdering bool, marshaler googlecloud.M
 		googlecloud.SubscriberConfig{
 			ProjectID:                "tests",
 			GenerateSubscriptionName: subscriptionName,
-			SubscriptionConfig: pubsub.SubscriptionConfig{
-				RetainAckedMessages:   false,
-				EnableMessageOrdering: enableMessageOrdering,
+			GenerateSubscription: func(params googlecloud.GenerateSubscriptionParams) *pubsubpb.Subscription {
+				return &pubsubpb.Subscription{
+					RetainAckedMessages:   false,
+					EnableMessageOrdering: enableMessageOrdering,
+				}
 			},
 			Unmarshaler: unmarshaler,
 		},

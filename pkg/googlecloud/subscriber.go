@@ -7,7 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/cenkalti/backoff/v3"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
@@ -36,8 +37,8 @@ type Subscriber struct {
 	closed  atomic.Bool
 
 	allSubscriptionsWaitGroup sync.WaitGroup
-	activeSubscriptions       map[string]*pubsub.Subscription
-	activeSubscriptionsLock   sync.RWMutex
+	activeSubscribers         map[string]*pubsub.Subscriber
+	activeSubscribersLock     sync.RWMutex
 
 	client     *pubsub.Client
 	clientLock sync.RWMutex
@@ -86,15 +87,17 @@ type SubscriberConfig struct {
 	InitializeTimeout time.Duration
 
 	// Settings for cloud.google.com/go/pubsub client library.
-	ReceiveSettings    pubsub.ReceiveSettings
-	SubscriptionConfig pubsub.SubscriptionConfig
-	ClientOptions      []option.ClientOption
-	ClientConfig       *pubsub.ClientConfig
+	ReceiveSettings      pubsub.ReceiveSettings
+	GenerateSubscription func(params GenerateSubscriptionParams) *pubsubpb.Subscription
+	ClientOptions        []option.ClientOption
+	ClientConfig         *pubsub.ClientConfig
 
 	// Unmarshaler transforms the client library format into watermill/message.Message.
 	// Use a custom unmarshaler if needed, otherwise the default Unmarshaler should cover most use cases.
 	Unmarshaler Unmarshaler
 }
+
+type GenerateSubscriptionParams struct{}
 
 func (c *SubscriberConfig) topicProjectID() string {
 	if c.TopicProjectID != "" {
@@ -144,8 +147,8 @@ func NewSubscriber(
 		closing: make(chan struct{}, 1),
 
 		allSubscriptionsWaitGroup: sync.WaitGroup{},
-		activeSubscriptions:       map[string]*pubsub.Subscription{},
-		activeSubscriptionsLock:   sync.RWMutex{},
+		activeSubscribers:         map[string]*pubsub.Subscriber{},
+		activeSubscribersLock:     sync.RWMutex{},
 
 		config: config,
 
@@ -276,7 +279,7 @@ func (s *Subscriber) Close() error {
 
 func (s *Subscriber) receive(
 	ctx context.Context,
-	sub *pubsub.Subscription,
+	sub *pubsub.Subscriber,
 	subcribeLogFields watermill.LogFields,
 	output chan *message.Message,
 ) error {
@@ -345,19 +348,19 @@ func (s *Subscriber) receive(
 
 // subscription obtains a subscription object.
 // If subscription doesn't exist on PubSub, create it, unless config variable DoNotCreateSubscriptionWhenMissing is set.
-func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicName string) (sub *pubsub.Subscription, err error) {
-	s.activeSubscriptionsLock.RLock()
-	sub, ok := s.activeSubscriptions[subscriptionName]
-	s.activeSubscriptionsLock.RUnlock()
+func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicName string) (sub *pubsub.Subscriber, err error) {
+	s.activeSubscribersLock.RLock()
+	sub, ok := s.activeSubscribers[subscriptionName]
+	s.activeSubscribersLock.RUnlock()
 	if ok {
 		return sub, nil
 	}
 
-	s.activeSubscriptionsLock.Lock()
-	defer s.activeSubscriptionsLock.Unlock()
+	s.activeSubscribersLock.Lock()
+	defer s.activeSubscribersLock.Unlock()
 	defer func() {
 		if err == nil {
-			s.activeSubscriptions[subscriptionName] = sub
+			s.activeSubscribers[subscriptionName] = sub
 		}
 	}()
 
@@ -366,48 +369,53 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		return nil, errors.Wrap(err, "could not initialize client")
 	}
 
-	sub = s.client.Subscription(subscriptionName)
-	exists, err := sub.Exists(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "could not check if subscription %s exists", subscriptionName)
-	}
+	sub = s.client.Subscriber(subscriptionName)
 
-	if exists {
-		return s.existingSubscription(ctx, sub, topicName)
+	subResp, err := s.client.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+		Subscription: subscriptionName,
+	})
+	if err == nil {
+		return s.existingSubscriber(sub, subResp, topicName)
+	}
+	if err != nil {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.NotFound {
+			return nil, errors.Wrapf(err, "could not get subscription %s", subscriptionName)
+		}
 	}
 
 	if s.config.DoNotCreateSubscriptionIfMissing {
 		return nil, errors.Wrap(ErrSubscriptionDoesNotExist, subscriptionName)
 	}
 
-	t := s.client.Topic(topicName)
-	exists, err = t.Exists(ctx)
+	tExists, err := topicExists(ctx, s.client, topicName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topicName)
 	}
 
-	if !exists && s.config.DoNotCreateTopicIfMissing {
+	if !tExists && s.config.DoNotCreateTopicIfMissing {
 		return nil, errors.Wrap(ErrTopicDoesNotExist, topicName)
 	}
 
-	if !exists {
-		t, err = s.client.CreateTopic(ctx, topicName)
+	if !tExists {
+		_, err = s.client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{
+			Name: topicName,
+		})
 
 		if status.Code(err) == codes.AlreadyExists {
 			s.logger.Debug("Topic already exists", watermill.LogFields{"topic": topicName})
-			t = s.client.Topic(topicName)
 		} else if err != nil {
 			return nil, errors.Wrap(err, "could not create topic for subscription")
 		}
 	}
 
-	config := s.config.SubscriptionConfig
-	config.Topic = t
+	subConfig := s.config.GenerateSubscription(GenerateSubscriptionParams{})
+	subConfig.Name = subscriptionName
+	subConfig.Topic = topicName
 
-	sub, err = s.client.CreateSubscription(ctx, subscriptionName, config)
+	_, err = s.client.SubscriptionAdminClient.CreateSubscription(ctx, subConfig)
 	if status.Code(err) == codes.AlreadyExists {
 		s.logger.Debug("Subscription already exists", watermill.LogFields{"subscription": subscriptionName})
-		sub = s.client.Subscription(subscriptionName)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "cannot create subscription")
 	}
@@ -435,12 +443,7 @@ func (s *Subscriber) initClient(ctx context.Context) error {
 	return nil
 }
 
-func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subscription, topic string) (*pubsub.Subscription, error) {
-	config, err := sub.Config(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not fetch config for existing subscription")
-	}
-
+func (s *Subscriber) existingSubscriber(sub *pubsub.Subscriber, subscription *pubsubpb.Subscription, topic string) (*pubsub.Subscriber, error) {
 	sub.ReceiveSettings = s.config.ReceiveSettings
 
 	if s.config.DoNotEnforceSubscriptionAttachedToTopic {
@@ -449,10 +452,10 @@ func (s *Subscriber) existingSubscription(ctx context.Context, sub *pubsub.Subsc
 
 	fullyQualifiedTopicName := fmt.Sprintf("projects/%s/topics/%s", s.config.topicProjectID(), topic)
 
-	if config.Topic.String() != fullyQualifiedTopicName {
+	if subscription.Topic != fullyQualifiedTopicName {
 		return nil, errors.Wrap(
 			ErrUnexpectedTopic,
-			fmt.Sprintf("topic of existing sub: %s; expecting: %s", config.Topic.String(), fullyQualifiedTopicName),
+			fmt.Sprintf("topic of existing sub: %s; expecting: %s", subscription.Topic, fullyQualifiedTopicName),
 		)
 	}
 
