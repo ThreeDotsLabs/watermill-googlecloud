@@ -152,7 +152,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	}
 
 	for _, msg := range messages {
-		err = p.publishMessage(pub, msg, topic)
+		err = p.publishMessage(t, msg, topic)
 		if err != nil {
 			return err
 		}
@@ -161,7 +161,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	return nil
 }
 
-func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, topic string) error {
+func (p *Publisher) publishMessage(t *pubsub.Topic, msg *message.Message, topic string) error {
 	ctx, cancel := context.WithTimeout(msg.Context(), p.config.PublishTimeout)
 	defer cancel()
 
@@ -176,12 +176,12 @@ func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, 
 		return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
 	}
 
-	result := pub.Publish(ctx, googlecloudMsg)
+	result := t.Publish(ctx, googlecloudMsg)
 
 	serverMessageID, err := result.Get(ctx)
 	if err != nil {
 		if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
-			pub.ResumePublish(googlecloudMsg.OrderingKey)
+			t.ResumePublish(googlecloudMsg.OrderingKey)
 		}
 		return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
 	}
