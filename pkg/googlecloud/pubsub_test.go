@@ -126,7 +126,6 @@ func TestPublishSubscribeOrdering(t *testing.T) {
 }
 
 func TestSubscriberAllowedWhenAttachedToAnotherTopic(t *testing.T) {
-	rand.Seed(time.Now().Unix())
 	testNumber := rand.Int()
 	logger := watermill.NewStdLogger(true, true)
 
@@ -135,6 +134,7 @@ func TestSubscriberAllowedWhenAttachedToAnotherTopic(t *testing.T) {
 	}
 
 	sub1, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID:                "tests",
 		GenerateSubscriptionName: subNameFn,
 	}, logger)
 	require.NoError(t, err)
@@ -142,6 +142,7 @@ func TestSubscriberAllowedWhenAttachedToAnotherTopic(t *testing.T) {
 	topic1 := fmt.Sprintf("topic1_%d", testNumber)
 
 	sub2, err := googlecloud.NewSubscriber(googlecloud.SubscriberConfig{
+		ProjectID:                               "tests",
 		GenerateSubscriptionName:                subNameFn,
 		DoNotEnforceSubscriptionAttachedToTopic: true,
 	}, logger)
