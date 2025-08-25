@@ -145,7 +145,14 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 
 	deadline := time.Now().Add(p.config.PublishTimeout)
 
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	var ctx context.Context
+	if len(messages) > 0 {
+		ctx = messages[0].Context()
+	} else {
+		ctx = context.Background()
+	}
+
+	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
 	t, err := p.topic(ctx, topic)
