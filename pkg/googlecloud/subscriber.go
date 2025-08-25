@@ -7,18 +7,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	pubsubv1 "cloud.google.com/go/pubsub"
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cenkalti/backoff/v3"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill/message"
 )
 
 var (
@@ -91,9 +88,6 @@ type SubscriberConfig struct {
 	// Settings for cloud.google.com/go/pubsub client library.
 	ReceiveSettings pubsub.ReceiveSettings
 
-	// Deprecated: Use GenerateSubscription instead.
-	// This config comes from the v1 client library. It will be mapped to the v2 config, but some new fields may not be supported.
-	SubscriptionConfig   pubsubv1.SubscriptionConfig
 	GenerateSubscription func(params GenerateSubscriptionParams) *pubsubpb.Subscription
 
 	ClientOptions []option.ClientOption
@@ -137,11 +131,6 @@ func (c *SubscriberConfig) setDefaults() {
 	}
 	if c.Unmarshaler == nil {
 		c.Unmarshaler = DefaultMarshalerUnmarshaler{}
-	}
-	if c.GenerateSubscription == nil {
-		c.GenerateSubscription = func(params GenerateSubscriptionParams) *pubsubpb.Subscription {
-			return subscriptionFromSubscriptionConfig(c.SubscriptionConfig)
-		}
 	}
 }
 
@@ -421,7 +410,13 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		}
 	}
 
-	subConfig := s.config.GenerateSubscription(GenerateSubscriptionParams{})
+	var subConfig *pubsubpb.Subscription
+	if s.config.GenerateSubscription != nil {
+		subConfig = s.config.GenerateSubscription(GenerateSubscriptionParams{})
+	} else {
+		subConfig = &pubsubpb.Subscription{}
+	}
+
 	subConfig.Name = fullyQualifiedSubscriptionName(s.config.ProjectID, subscriptionName)
 	subConfig.Topic = fullyQualifiedTopicName(s.config.topicProjectID(), topicName)
 
@@ -472,111 +467,6 @@ func (s *Subscriber) existingSubscriber(sub *pubsub.Subscriber, subscription *pu
 	}
 
 	return sub, nil
-}
-
-func subscriptionFromSubscriptionConfig(cfg pubsubv1.SubscriptionConfig) *pubsubpb.Subscription {
-	pushConfig := &pubsubpb.PushConfig{
-		PushEndpoint:         cfg.PushConfig.Endpoint,
-		Attributes:           cfg.PushConfig.Attributes,
-		AuthenticationMethod: nil, // TODO
-		Wrapper:              nil, // TODO
-	}
-
-	bigQueryConfig := &pubsubpb.BigQueryConfig{
-		Table:               "",
-		UseTopicSchema:      false,
-		WriteMetadata:       false,
-		DropUnknownFields:   false,
-		State:               0,
-		UseTableSchema:      false,
-		ServiceAccountEmail: "",
-	}
-
-	cloudStorageConfig := &pubsubpb.CloudStorageConfig{
-		Bucket:                 "",
-		FilenamePrefix:         "",
-		FilenameSuffix:         "",
-		FilenameDatetimeFormat: "",
-		OutputFormat:           nil,
-		MaxDuration:            nil,
-		MaxBytes:               0,
-		MaxMessages:            0,
-		State:                  0,
-		ServiceAccountEmail:    "",
-	}
-
-	var messageRetentionDuration *durationpb.Duration
-	if cfg.RetentionDuration != 0 {
-		messageRetentionDuration = durationpb.New(cfg.RetentionDuration)
-	}
-
-	var topicMessageRetentionDuration *durationpb.Duration
-	if cfg.TopicMessageRetentionDuration != 0 {
-		topicMessageRetentionDuration = durationpb.New(cfg.TopicMessageRetentionDuration)
-	}
-
-	var expirationPolicy *pubsubpb.ExpirationPolicy
-	if cfg.ExpirationPolicy != nil {
-		expirationPolicy = &pubsubpb.ExpirationPolicy{
-			Ttl: durationpb.New(cfg.ExpirationPolicy.(time.Duration)),
-		}
-	}
-
-	var deadLetterPolicy *pubsubpb.DeadLetterPolicy
-	if cfg.DeadLetterPolicy != nil {
-		deadLetterPolicy = &pubsubpb.DeadLetterPolicy{
-			MaxDeliveryAttempts: int32(cfg.DeadLetterPolicy.MaxDeliveryAttempts),
-			DeadLetterTopic:     cfg.DeadLetterPolicy.DeadLetterTopic,
-		}
-	}
-
-	var retryPolicy *pubsubpb.RetryPolicy
-	if cfg.RetryPolicy != nil {
-		retryPolicy = &pubsubpb.RetryPolicy{}
-
-		if cfg.RetryPolicy.MinimumBackoff != nil {
-			retryPolicy.MinimumBackoff = durationpb.New(cfg.RetryPolicy.MinimumBackoff.(time.Duration))
-		}
-
-		if cfg.RetryPolicy.MaximumBackoff != nil {
-			retryPolicy.MaximumBackoff = durationpb.New(cfg.RetryPolicy.MaximumBackoff.(time.Duration))
-		}
-	}
-
-	var messageTransforms []*pubsubpb.MessageTransform
-	for _, transform := range cfg.MessageTransforms {
-		udf := transform.Transform.(pubsubv1.JavaScriptUDF)
-		messageTransforms = append(messageTransforms, &pubsubpb.MessageTransform{
-			Transform: &pubsubpb.MessageTransform_JavascriptUdf{
-				JavascriptUdf: &pubsubpb.JavaScriptUDF{
-					FunctionName: udf.FunctionName,
-					Code:         udf.Code,
-				},
-			},
-			Disabled: transform.Disabled,
-		})
-	}
-
-	return &pubsubpb.Subscription{
-		PushConfig:                    pushConfig,
-		BigqueryConfig:                bigQueryConfig,
-		CloudStorageConfig:            cloudStorageConfig,
-		AckDeadlineSeconds:            int32(cfg.AckDeadline.Seconds()),
-		RetainAckedMessages:           cfg.RetainAckedMessages,
-		MessageRetentionDuration:      messageRetentionDuration,
-		Labels:                        cfg.Labels,
-		EnableMessageOrdering:         cfg.EnableMessageOrdering,
-		ExpirationPolicy:              expirationPolicy,
-		Filter:                        cfg.Filter,
-		DeadLetterPolicy:              deadLetterPolicy,
-		RetryPolicy:                   retryPolicy,
-		Detached:                      cfg.Detached,
-		EnableExactlyOnceDelivery:     cfg.EnableExactlyOnceDelivery,
-		TopicMessageRetentionDuration: topicMessageRetentionDuration,
-		State:                         pubsubpb.Subscription_State(cfg.State),
-		AnalyticsHubSubscriptionInfo:  nil, // Unmapped
-		MessageTransforms:             messageTransforms,
-	}
 }
 
 func fullyQualifiedSubscriptionName(projectID, subscriptionName string) string {
