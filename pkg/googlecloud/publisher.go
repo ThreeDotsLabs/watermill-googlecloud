@@ -147,7 +147,16 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return ErrPublisherClosed
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.config.PublishTimeout)
+	deadline := time.Now().Add(p.config.PublishTimeout)
+
+	var ctx context.Context
+	if len(messages) > 0 {
+		ctx = messages[0].Context()
+	} else {
+		ctx = context.Background()
+	}
+
+	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
 	pub, err := p.publisher(ctx, topic)
@@ -155,33 +164,44 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return err
 	}
 
-	logFields := make(watermill.LogFields, 2)
-	logFields["topic"] = topic
-
 	for _, msg := range messages {
-		logFields["message_uuid"] = msg.UUID
-		p.logger.Trace("Sending message to Google PubSub", logFields)
-
-		googlecloudMsg, err := p.config.Marshaler.Marshal(topic, msg)
+		err = p.publishMessage(t, msg, topic, deadline)
 		if err != nil {
-			return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
+			return err
 		}
-
-		result := pub.Publish(ctx, googlecloudMsg)
-		<-result.Ready()
-
-		serverMessageID, err := result.Get(ctx)
-		if err != nil {
-			if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
-				pub.ResumePublish(googlecloudMsg.OrderingKey)
-			}
-			return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
-		}
-
-		msg.Metadata.Set(GoogleMessageIDHeaderKey, serverMessageID)
-
-		p.logger.Trace("Message published to Google PubSub", logFields)
 	}
+
+	return nil
+}
+
+func (p *Publisher) publishMessage(t *pubsub.Topic, msg *message.Message, topic string, deadline time.Time) error {
+	ctx, cancel := context.WithDeadline(msg.Context(), deadline)
+	defer cancel()
+
+	logFields := watermill.LogFields{
+		"topic":        topic,
+		"message_uuid": msg.UUID,
+	}
+	p.logger.Trace("Sending message to Google PubSub", logFields)
+
+	googlecloudMsg, err := p.config.Marshaler.Marshal(topic, msg)
+	if err != nil {
+		return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
+	}
+
+	result := t.Publish(ctx, googlecloudMsg)
+
+	serverMessageID, err := result.Get(ctx)
+	if err != nil {
+		if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
+			t.ResumePublish(googlecloudMsg.OrderingKey)
+		}
+		return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
+	}
+
+	msg.Metadata.Set(GoogleMessageIDHeaderKey, serverMessageID)
+
+	p.logger.Trace("Message published to Google PubSub", logFields)
 
 	return nil
 }
