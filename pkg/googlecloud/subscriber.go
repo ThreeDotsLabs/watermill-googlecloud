@@ -389,7 +389,7 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 		return nil, errors.Wrap(ErrSubscriptionDoesNotExist, subscriptionName)
 	}
 
-	tExists, err := topicExists(ctx, s.client, s.config.ProjectID, topicName)
+	tExists, err := topicExists(ctx, s.client, s.config.topicProjectID(), topicName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not check if topic %s exists", topicName)
 	}
