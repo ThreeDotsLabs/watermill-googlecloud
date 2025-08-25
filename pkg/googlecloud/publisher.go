@@ -143,7 +143,9 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return ErrPublisherClosed
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.config.PublishTimeout)
+	deadline := time.Now().Add(p.config.PublishTimeout)
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 
 	t, err := p.topic(ctx, topic)
@@ -152,7 +154,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	}
 
 	for _, msg := range messages {
-		err = p.publishMessage(t, msg, topic)
+		err = p.publishMessage(t, msg, topic, deadline)
 		if err != nil {
 			return err
 		}
@@ -161,8 +163,8 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	return nil
 }
 
-func (p *Publisher) publishMessage(t *pubsub.Topic, msg *message.Message, topic string) error {
-	ctx, cancel := context.WithTimeout(msg.Context(), p.config.PublishTimeout)
+func (p *Publisher) publishMessage(t *pubsub.Topic, msg *message.Message, topic string, deadline time.Time) error {
+	ctx, cancel := context.WithDeadline(msg.Context(), deadline)
 	defer cancel()
 
 	logFields := watermill.LogFields{
