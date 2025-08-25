@@ -5,12 +5,10 @@ go 1.23.0
 require (
 	cloud.google.com/go v0.115.1 // indirect
 	cloud.google.com/go/pubsub v1.42.0
-	github.com/ThreeDotsLabs/watermill v1.3.7
+	github.com/ThreeDotsLabs/watermill v1.4.8-0.20250825132336-9e066d39bea6
 	github.com/cenkalti/backoff/v3 v3.2.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/lithammer/shortuuid/v3 v3.0.7 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
