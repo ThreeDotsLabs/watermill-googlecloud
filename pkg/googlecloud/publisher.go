@@ -27,9 +27,9 @@ var (
 )
 
 type Publisher struct {
-	publishers map[string]*pubsub.Publisher
-	topicsLock sync.RWMutex
-	closed     bool
+	publishers     map[string]*pubsub.Publisher
+	publishersLock sync.RWMutex
+	closed         bool
 
 	client *pubsub.Client
 	config PublisherConfig
@@ -216,30 +216,30 @@ func (p *Publisher) Close() error {
 	}
 	p.closed = true
 
-	p.topicsLock.Lock()
-	for _, t := range p.publishers {
-		t.Stop()
+	p.publishersLock.Lock()
+	for _, pub := range p.publishers {
+		pub.Stop()
 	}
-	p.topicsLock.Unlock()
+	p.publishersLock.Unlock()
 
 	return p.client.Close()
 }
 
 func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Publisher, err error) {
-	p.topicsLock.RLock()
+	p.publishersLock.RLock()
 	pub, ok := p.publishers[topic]
-	p.topicsLock.RUnlock()
+	p.publishersLock.RUnlock()
 	if ok {
 		return pub, nil
 	}
 
-	p.topicsLock.Lock()
+	p.publishersLock.Lock()
 	defer func() {
 		if err == nil {
 			pub.EnableMessageOrdering = p.config.EnableMessageOrdering
 			p.publishers[topic] = pub
 		}
-		p.topicsLock.Unlock()
+		p.publishersLock.Unlock()
 	}()
 
 	pub = p.client.Publisher(topic)
