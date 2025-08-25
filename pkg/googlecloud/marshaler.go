@@ -1,7 +1,7 @@
 package googlecloud
 
 import (
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
 	"github.com/pkg/errors"
 
 	"github.com/ThreeDotsLabs/watermill/message"
