@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	cloud.google.com/go v0.121.4 // indirect
-	github.com/ThreeDotsLabs/watermill v1.4.8-0.20250825132336-9e066d39bea6
+	github.com/ThreeDotsLabs/watermill v1.5.0
 	github.com/cenkalti/backoff/v3 v3.2.2
 	github.com/google/uuid v1.6.0
 	github.com/lithammer/shortuuid/v3 v3.0.7 // indirect
