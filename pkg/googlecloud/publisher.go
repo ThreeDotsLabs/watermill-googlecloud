@@ -8,6 +8,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	stderrors "errors"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -135,6 +136,13 @@ func connect(ctx context.Context, config PublisherConfig) (<-chan *pubsub.Client
 	return out, errc, nil
 }
 
+type publishTrackingInfo struct {
+	msg       *message.Message
+	googleMsg *pubsub.Message
+	// result is nil until published
+	result *pubsub.PublishResult
+}
+
 // Publish publishes a set of messages on a Google Cloud Pub/Sub topic.
 // It blocks until all the messages are successfully published or an error occurred.
 //
@@ -164,46 +172,67 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return err
 	}
 
+	preparedMessages := make([]*publishTrackingInfo, 0, len(messages))
 	for _, msg := range messages {
-		err = p.publishMessage(pub, msg, topic, deadline)
+		info, err := p.prepareMessage(topic, msg)
 		if err != nil {
 			return err
 		}
+		preparedMessages = append(preparedMessages, info)
 	}
 
-	return nil
+	for _, info := range preparedMessages {
+		info.result = p.publishAsync(pub, info, topic, deadline)
+	}
+
+	var errs []error
+	for _, info := range preparedMessages {
+		serverMessageID, err := info.result.Get(ctx)
+		if err != nil {
+			if p.config.EnableMessageOrdering &&
+				p.config.EnableMessageOrderingAutoResumePublishOnError &&
+				info.googleMsg.OrderingKey != "" {
+				pub.ResumePublish(info.googleMsg.OrderingKey)
+			}
+			errs = append(errs, errors.Wrapf(err, "publishing message %s failed", info.msg.UUID))
+			continue
+		}
+
+		info.msg.Metadata.Set(GoogleMessageIDHeaderKey, serverMessageID)
+
+		p.logger.Trace("Message published to Google PubSub", watermill.LogFields{
+			"topic":        topic,
+			"message_uuid": info.msg.UUID,
+			"pubsub_id":    serverMessageID,
+		})
+	}
+
+	return stderrors.Join(errs...)
 }
 
-func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, topic string, deadline time.Time) error {
-	ctx, cancel := context.WithDeadline(msg.Context(), deadline)
+func (p *Publisher) publishAsync(pub *pubsub.Publisher, trackingInfo *publishTrackingInfo, topic string, deadline time.Time) *pubsub.PublishResult {
+	ctx, cancel := context.WithDeadline(trackingInfo.msg.Context(), deadline)
 	defer cancel()
 
 	logFields := watermill.LogFields{
 		"topic":        topic,
-		"message_uuid": msg.UUID,
+		"message_uuid": trackingInfo.msg.UUID,
 	}
 	p.logger.Trace("Sending message to Google PubSub", logFields)
 
-	googlecloudMsg, err := p.config.Marshaler.Marshal(topic, msg)
+	return pub.Publish(ctx, trackingInfo.googleMsg)
+}
+
+func (p *Publisher) prepareMessage(topic string, msg *message.Message) (*publishTrackingInfo, error) {
+	googleMsg, err := p.config.Marshaler.Marshal(topic, msg)
 	if err != nil {
-		return errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
+		return nil, errors.Wrapf(err, "cannot marshal message %s", msg.UUID)
 	}
 
-	result := pub.Publish(ctx, googlecloudMsg)
-
-	serverMessageID, err := result.Get(ctx)
-	if err != nil {
-		if p.config.EnableMessageOrdering && p.config.EnableMessageOrderingAutoResumePublishOnError && googlecloudMsg.OrderingKey != "" {
-			pub.ResumePublish(googlecloudMsg.OrderingKey)
-		}
-		return errors.Wrapf(err, "publishing message %s failed", msg.UUID)
-	}
-
-	msg.Metadata.Set(GoogleMessageIDHeaderKey, serverMessageID)
-
-	p.logger.Trace("Message published to Google PubSub", logFields)
-
-	return nil
+	return &publishTrackingInfo{
+		msg:       msg,
+		googleMsg: googleMsg,
+	}, nil
 }
 
 // Close notifies the Publisher to stop processing messages, send all the remaining messages and close the connection.
