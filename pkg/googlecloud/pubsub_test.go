@@ -266,7 +266,7 @@ func TestPublishedMessageIdMatchesReceivedMessageId(t *testing.T) {
 		ProjectID: "tests",
 	}, nil)
 	require.NoError(t, err)
-	defer pub.Close()
+	defer func() { _ = pub.Close() }()
 
 	// Publish a message
 	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
@@ -296,7 +296,7 @@ func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
 		DoNotCreateTopicIfMissing: false,
 	}, nil)
 	require.NoError(t, err)
-	defer pub.Close()
+	defer func() { _ = pub.Close() }()
 
 	// Publish a message
 	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
@@ -308,7 +308,7 @@ func produceMessages(t *testing.T, topic string, howMany int) {
 		ProjectID: "tests",
 	}, nil)
 	require.NoError(t, err)
-	defer pub.Close()
+	defer func() { _ = pub.Close() }()
 
 	messages := make([]*message.Message, howMany)
 	for i := 0; i < howMany; i++ {
