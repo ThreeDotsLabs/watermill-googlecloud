@@ -16,7 +16,7 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/api v0.279.0
 	google.golang.org/genproto v0.0.0-20260511170946-3700d4141b60 // indirect
-	google.golang.org/grpc v1.81.0
+	google.golang.org/grpc v1.82.1
 )
 
 require cloud.google.com/go/pubsub/v2 v2.6.0
