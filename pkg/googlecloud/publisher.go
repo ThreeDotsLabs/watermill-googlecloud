@@ -234,6 +234,14 @@ func (p *Publisher) publisher(ctx context.Context, topic string) (pub *pubsub.Pu
 	}
 
 	p.publishersLock.Lock()
+
+	// another goroutine may have initialized the publisher while we were waiting for the lock
+	pub, ok = p.publishers[topic]
+	if ok {
+		p.publishersLock.Unlock()
+		return pub, nil
+	}
+
 	defer func() {
 		if err == nil {
 			pub.EnableMessageOrdering = p.config.EnableMessageOrdering
