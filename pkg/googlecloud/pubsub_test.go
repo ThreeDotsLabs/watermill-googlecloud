@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-googlecloud/v2/pkg/googlecloud"
@@ -301,6 +305,44 @@ func TestPublisherDoesNotAttemptToCreateTopic(t *testing.T) {
 	// Publish a message
 	publishedMsg := message.NewMessage(watermill.NewUUID(), []byte{})
 	require.Error(t, pub.Publish(topic, publishedMsg), googlecloud.ErrTopicDoesNotExist)
+}
+
+// The race window is narrow, so this test doesn't catch a regression on every run;
+// it's a showcase of the issue and a guard against similar ones, not a proof of correctness.
+func TestPublisherChecksTopicExistenceOnce(t *testing.T) {
+	var getTopicCalls atomic.Int64
+
+	countGetTopicCalls := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if _, ok := req.(*pubsubpb.GetTopicRequest); ok {
+			getTopicCalls.Add(1)
+			// widens the window for concurrent Publish calls to race on the topic initialization
+			time.Sleep(20 * time.Millisecond)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+
+	pub, err := googlecloud.NewPublisher(googlecloud.PublisherConfig{
+		ProjectID: "tests",
+		ClientOptions: []option.ClientOption{
+			option.WithGRPCDialOption(grpc.WithChainUnaryInterceptor(countGetTopicCalls)),
+		},
+	}, nil)
+	require.NoError(t, err)
+	defer func() { _ = pub.Close() }()
+
+	for i := 0; i < 50; i++ {
+		topic := fmt.Sprintf("topic_existence_checked_once_%d", i)
+
+		var wg sync.WaitGroup
+		for j := 0; j < 50; j++ {
+			wg.Go(func() {
+				assert.NoError(t, pub.Publish(topic, message.NewMessage(watermill.NewUUID(), []byte{})))
+			})
+		}
+		wg.Wait()
+
+		require.EqualValues(t, 1, getTopicCalls.Swap(0), "topic %s existence checked more than once", topic)
+	}
 }
 
 func produceMessages(t *testing.T, topic string, howMany int) {
