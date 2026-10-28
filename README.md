@@ -2,7 +2,6 @@
 <img align="right" width="200" src="https://watermill.io/img/gopher.svg">
 
 [![CI Status](https://github.com/ThreeDotsLabs/watermill-googlecloud/actions/workflows/master.yml/badge.svg)](https://github.com/ThreeDotsLabs/watermill-googlecloud/actions/workflows/master.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ThreeDotsLabs/watermill-googlecloud)](https://goreportcard.com/report/github.com/ThreeDotsLabs/watermill-googlecloud)
 
 This is Pub/Sub for the [Watermill](https://watermill.io/) project.
 It uses the [Google Cloud Pub/Sub](https://cloud.google.com/pubsub) service.
