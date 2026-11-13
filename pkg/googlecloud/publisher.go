@@ -54,7 +54,16 @@ type PublisherConfig struct {
 
 	// ConnectTimeout defines the timeout for connecting to Pub/Sub
 	ConnectTimeout time.Duration
-	// PublishTimeout defines the timeout for publishing messages.
+	// PublishTimeout limits how long Publish waits for each message to be published,
+	// counted separately for every message from the moment its publishing starts.
+	// Messages passed to a single Publish call are published one after another, so the whole call
+	// may take up to len(messages) times PublishTimeout.
+	// Topic initialization done by the first Publish to a topic (checking if it exists and creating it)
+	// is limited by PublishTimeout as well.
+	// Cancelling the message's context stops waiting earlier.
+	//
+	// PublishTimeout only limits the waiting: when it expires, the message may still be sent to Pub/Sub
+	// by the client library (see PublishSettings.Timeout).
 	PublishTimeout time.Duration
 
 	// Settings for cloud.google.com/go/pubsub client library.
@@ -147,8 +156,6 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		return ErrPublisherClosed
 	}
 
-	deadline := time.Now().Add(p.config.PublishTimeout)
-
 	var ctx context.Context
 	if len(messages) > 0 {
 		ctx = messages[0].Context()
@@ -156,7 +163,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 		ctx = context.Background()
 	}
 
-	ctx, cancel := context.WithDeadline(ctx, deadline)
+	ctx, cancel := context.WithTimeout(ctx, p.config.PublishTimeout)
 	defer cancel()
 
 	pub, err := p.publisher(ctx, topic)
@@ -165,7 +172,7 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	}
 
 	for _, msg := range messages {
-		err = p.publishMessage(pub, msg, topic, deadline)
+		err = p.publishMessage(pub, msg, topic)
 		if err != nil {
 			return err
 		}
@@ -174,8 +181,10 @@ func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
 	return nil
 }
 
-func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, topic string, deadline time.Time) error {
-	ctx, cancel := context.WithDeadline(msg.Context(), deadline)
+func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, topic string) error {
+	// Messages are published one by one, so each of them gets its own timeout.
+	// Otherwise, a long enough batch would always time out, no matter how many times it's retried.
+	ctx, cancel := context.WithTimeout(msg.Context(), p.config.PublishTimeout)
 	defer cancel()
 
 	logFields := watermill.LogFields{
