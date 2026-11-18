@@ -34,6 +34,9 @@ var (
 type Subscriber struct {
 	closing chan struct{}
 	closed  atomic.Bool
+	// closedLock makes marking the subscriber as closed mutually exclusive with adding subscriptions
+	// to allSubscriptionsWaitGroup, so no subscription is added after Close started waiting for them.
+	closedLock sync.Mutex
 
 	allSubscriptionsWaitGroup sync.WaitGroup
 	activeSubscribers         map[string]*pubsub.Subscriber
@@ -188,17 +191,28 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 	sub, err := s.subscription(ctx, subscriptionName, topic)
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, s.wrapClosedError(err)
 	}
 
+	if !s.addAllSubscriptionsWaitGroup() {
+		cancel()
+		return nil, ErrSubscriberClosed
+	}
+
+	// When ReceiveSettings.ShutdownOptions are set, Receive returns without waiting for running callbacks
+	// (and may even start a callback after it returned), so callbacks may still send to output.
+	// Callbacks hold outputLock for reading while they may use output, and output is closed with outputLock held
+	// for writing, so it's never closed while a callback uses it.
+	var outputLock sync.RWMutex
+	outputClosed := false
+
 	receiveFinished := make(chan struct{})
-	s.allSubscriptionsWaitGroup.Add(1)
 	go func() {
 		exponentialBackoff := backoff.NewExponentialBackOff()
 		exponentialBackoff.MaxElapsedTime = 0 // 0 means it never expires
 
 		if err := backoff.Retry(func() error {
-			err := s.receive(ctx, sub, logFields, output)
+			err := s.receive(ctx, sub, logFields, output, &outputLock, &outputClosed)
 			if err == nil {
 				s.logger.Info("Receiving messages finished with no error", logFields)
 				return nil
@@ -226,7 +240,14 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 
 	go func() {
 		<-receiveFinished
+
+		// Waits for running callbacks: Receive cancelled their contexts when it returned,
+		// so callbacks waiting for the consumer or for an ack return right away.
+		outputLock.Lock()
+		outputClosed = true
 		close(output)
+		outputLock.Unlock()
+
 		s.allSubscriptionsWaitGroup.Done()
 	}()
 
@@ -234,6 +255,10 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string) (<-chan *messa
 }
 
 func (s *Subscriber) SubscribeInitialize(topic string) (err error) {
+	if s.closed.Load() {
+		return ErrSubscriberClosed
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.InitializeTimeout)
 	defer cancel()
 
@@ -246,20 +271,48 @@ func (s *Subscriber) SubscribeInitialize(topic string) (err error) {
 	s.logger.Info("Initializing subscription to Google Cloud PubSub topic", logFields)
 
 	if _, err := s.subscription(ctx, subscriptionName, topic); err != nil {
-		return err
+		return s.wrapClosedError(err)
 	}
 
 	return nil
 }
 
+// addAllSubscriptionsWaitGroup adds a subscription to allSubscriptionsWaitGroup, which Close waits for.
+// It returns false if the subscriber is already closed.
+func (s *Subscriber) addAllSubscriptionsWaitGroup() bool {
+	s.closedLock.Lock()
+	defer s.closedLock.Unlock()
+
+	if s.closed.Load() {
+		return false
+	}
+
+	s.allSubscriptionsWaitGroup.Add(1)
+	return true
+}
+
+// wrapClosedError returns ErrSubscriberClosed (wrapped with err's message) if the subscriber was closed
+// while err happened, as closing the client makes in-flight calls fail with errors that are hard to recognize.
+func (s *Subscriber) wrapClosedError(err error) error {
+	if !s.closed.Load() || errors.Is(err, ErrSubscriberClosed) {
+		return err
+	}
+
+	return errors.Wrap(ErrSubscriberClosed, err.Error())
+}
+
 // Close notifies the Subscriber to stop processing messages on all subscriptions, close all the output channels
 // and terminate the connection.
 func (s *Subscriber) Close() error {
+	// closedLock is held only while marking the subscriber as closed, not while waiting for subscriptions,
+	// so concurrent Subscribe calls don't block until Close finishes.
+	s.closedLock.Lock()
 	if !s.closed.CompareAndSwap(false, true) {
+		s.closedLock.Unlock()
 		return nil
 	}
-
 	close(s.closing)
+	s.closedLock.Unlock()
 
 	s.allSubscriptionsWaitGroup.Wait()
 
@@ -283,9 +336,23 @@ func (s *Subscriber) receive(
 	sub *pubsub.Subscriber,
 	subcribeLogFields watermill.LogFields,
 	output chan *message.Message,
+	outputLock *sync.RWMutex,
+	outputClosed *bool,
 ) error {
 	return sub.Receive(ctx, func(ctx context.Context, pubsubMsg *pubsub.Message) {
 		logFields := subcribeLogFields.Copy()
+
+		outputLock.RLock()
+		defer outputLock.RUnlock()
+
+		if *outputClosed {
+			s.logger.Info(
+				"Message not consumed, receiving messages finished",
+				logFields,
+			)
+			pubsubMsg.Nack()
+			return
+		}
 
 		msg, err := s.config.Unmarshaler.Unmarshal(pubsubMsg)
 		if err != nil {
@@ -318,33 +385,47 @@ func (s *Subscriber) receive(
 			// message consumed, wait for ack (or nack)
 		}
 
-		select {
-		case <-s.closing:
-			pubsubMsg.Nack()
-			s.logger.Trace(
-				"Closing, nacking message",
-				logFields,
-			)
-		case <-ctx.Done():
-			pubsubMsg.Nack()
-			s.logger.Trace(
-				"Ctx done, nacking message",
-				logFields,
-			)
-		case <-msg.Acked():
-			s.logger.Trace(
-				"Msg acked",
-				logFields,
-			)
+		ack, outcome := waitForAck(ctx, s.closing, msg)
+		if ack {
 			pubsubMsg.Ack()
-		case <-msg.Nacked():
+		} else {
 			pubsubMsg.Nack()
-			s.logger.Trace(
-				"Msg nacked",
-				logFields,
-			)
 		}
+		s.logger.Trace(outcome, logFields)
 	})
+}
+
+// waitForAck waits until the consumer acks or nacks msg, the subscriber is closing, or ctx is done.
+// It returns true if msg should be acked, and the outcome to log.
+func waitForAck(ctx context.Context, closing <-chan struct{}, msg *message.Message) (ack bool, outcome string) {
+	// When more than one case is ready, select picks a random one, so closing (or ctx cancellation)
+	// can win over an ack that already happened. Acked messages are acked anyway.
+	select {
+	case <-closing:
+		if isAcked(msg) {
+			return true, "Msg acked"
+		}
+		return false, "Closing, nacking message"
+	case <-ctx.Done():
+		if isAcked(msg) {
+			return true, "Msg acked"
+		}
+		return false, "Ctx done, nacking message"
+	case <-msg.Acked():
+		return true, "Msg acked"
+	case <-msg.Nacked():
+		return false, "Msg nacked"
+	}
+}
+
+// isAcked checks if msg is acked without waiting for it.
+func isAcked(msg *message.Message) bool {
+	select {
+	case <-msg.Acked():
+		return true
+	default:
+		return false
+	}
 }
 
 // subscription obtains a subscription object.
@@ -435,6 +516,12 @@ func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicNa
 func (s *Subscriber) initClient(ctx context.Context) error {
 	s.clientLock.Lock()
 	defer s.clientLock.Unlock()
+
+	// Close marks the subscriber as closed before closing the client (with clientLock held),
+	// so a client created here is either closed by Close, or not created at all.
+	if s.closed.Load() {
+		return ErrSubscriberClosed
+	}
 
 	if s.client != nil {
 		return nil
