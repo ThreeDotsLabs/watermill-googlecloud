@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
@@ -29,7 +30,7 @@ var (
 type Publisher struct {
 	publishers     map[string]*pubsub.Publisher
 	publishersLock sync.RWMutex
-	closed         bool
+	closed         atomic.Bool
 
 	client *pubsub.Client
 	config PublisherConfig
@@ -152,7 +153,7 @@ func connect(ctx context.Context, config PublisherConfig) (<-chan *pubsub.Client
 //
 // See https://cloud.google.com/pubsub/docs/publisher to find out more about how Google Cloud Pub/Sub Publishers work.
 func (p *Publisher) Publish(topic string, messages ...*message.Message) error {
-	if p.closed {
+	if p.closed.Load() {
 		return ErrPublisherClosed
 	}
 
@@ -217,13 +218,12 @@ func (p *Publisher) publishMessage(pub *pubsub.Publisher, msg *message.Message, 
 
 // Close notifies the Publisher to stop processing messages, send all the remaining messages and close the connection.
 func (p *Publisher) Close() error {
-	p.logger.Info("Closing Google PubSub publisher", nil)
-	defer p.logger.Info("Google PubSub publisher closed", nil)
-
-	if p.closed {
+	if !p.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	p.closed = true
+
+	p.logger.Info("Closing Google PubSub publisher", nil)
+	defer p.logger.Info("Google PubSub publisher closed", nil)
 
 	p.publishersLock.Lock()
 	for _, pub := range p.publishers {
