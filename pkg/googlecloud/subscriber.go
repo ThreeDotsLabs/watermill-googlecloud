@@ -36,8 +36,11 @@ type Subscriber struct {
 	closed  atomic.Bool
 
 	allSubscriptionsWaitGroup sync.WaitGroup
-	activeSubscribers         map[string]*pubsub.Subscriber
-	activeSubscribersLock     sync.RWMutex
+
+	// initializedSubscriptions maps names of subscriptions which were already checked to exist (or were created)
+	// to the fully qualified name of the topic they were initialized for.
+	initializedSubscriptions     map[string]string
+	initializedSubscriptionsLock sync.RWMutex
 
 	client     *pubsub.Client
 	clientLock sync.RWMutex
@@ -147,9 +150,9 @@ func NewSubscriber(
 	return &Subscriber{
 		closing: make(chan struct{}, 1),
 
-		allSubscriptionsWaitGroup: sync.WaitGroup{},
-		activeSubscribers:         map[string]*pubsub.Subscriber{},
-		activeSubscribersLock:     sync.RWMutex{},
+		allSubscriptionsWaitGroup:    sync.WaitGroup{},
+		initializedSubscriptions:     map[string]string{},
+		initializedSubscriptionsLock: sync.RWMutex{},
 
 		config: config,
 
@@ -349,19 +352,29 @@ func (s *Subscriber) receive(
 
 // subscription obtains a subscription object.
 // If subscription doesn't exist on PubSub, create it, unless config variable DoNotCreateSubscriptionWhenMissing is set.
+//
+// Each call returns a new subscription object, because the client library allows only one active Receive per object.
+// Existence of the subscription is checked only on the first call for the subscription name.
 func (s *Subscriber) subscription(ctx context.Context, subscriptionName, topicName string) (sub *pubsub.Subscriber, err error) {
-	s.activeSubscribersLock.RLock()
-	sub, ok := s.activeSubscribers[subscriptionName]
-	s.activeSubscribersLock.RUnlock()
+	s.initializedSubscriptionsLock.RLock()
+	subscriptionTopic, ok := s.initializedSubscriptions[subscriptionName]
+	s.initializedSubscriptionsLock.RUnlock()
 	if ok {
+		err = s.checkSubscriptionTopic(subscriptionTopic, topicName)
+		if err != nil {
+			return nil, err
+		}
+
+		sub = s.client.Subscriber(subscriptionName)
+		sub.ReceiveSettings = s.config.ReceiveSettings
 		return sub, nil
 	}
 
-	s.activeSubscribersLock.Lock()
-	defer s.activeSubscribersLock.Unlock()
+	s.initializedSubscriptionsLock.Lock()
+	defer s.initializedSubscriptionsLock.Unlock()
 	defer func() {
 		if err == nil {
-			s.activeSubscribers[subscriptionName] = sub
+			s.initializedSubscriptions[subscriptionName] = fullyQualifiedTopicName(s.config.topicProjectID(), topicName)
 		}
 	}()
 
@@ -453,20 +466,30 @@ func (s *Subscriber) initClient(ctx context.Context) error {
 func (s *Subscriber) existingSubscriber(sub *pubsub.Subscriber, subscription *pubsubpb.Subscription, topic string) (*pubsub.Subscriber, error) {
 	sub.ReceiveSettings = s.config.ReceiveSettings
 
+	if err := s.checkSubscriptionTopic(subscription.Topic, topic); err != nil {
+		return nil, err
+	}
+
+	return sub, nil
+}
+
+// checkSubscriptionTopic returns ErrUnexpectedTopic if subscriptionTopic (fully qualified name of the topic
+// the subscription is attached to) is not the expected topic, unless DoNotEnforceSubscriptionAttachedToTopic is set.
+func (s *Subscriber) checkSubscriptionTopic(subscriptionTopic, topic string) error {
 	if s.config.DoNotEnforceSubscriptionAttachedToTopic {
-		return sub, nil
+		return nil
 	}
 
 	fullName := fullyQualifiedTopicName(s.config.topicProjectID(), topic)
 
-	if subscription.Topic != fullName {
-		return nil, errors.Wrap(
+	if subscriptionTopic != fullName {
+		return errors.Wrap(
 			ErrUnexpectedTopic,
-			fmt.Sprintf("topic of existing sub: %s; expecting: %s", subscription.Topic, fullName),
+			fmt.Sprintf("topic of existing sub: %s; expecting: %s", subscriptionTopic, fullName),
 		)
 	}
 
-	return sub, nil
+	return nil
 }
 
 func fullyQualifiedSubscriptionName(projectID, subscriptionName string) string {
